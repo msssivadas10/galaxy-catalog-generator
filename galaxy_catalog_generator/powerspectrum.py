@@ -290,12 +290,18 @@ class PowerSpectrum( ABC ):
         Normalise the power spectrum using the value of sigma-8 parameter.
 
         """
+        # Save the current redshift and reset to present redshift (0), since the normalization
+        # is calculated for present redshift... 
+        redshift = self.redshift
+        object.__setattr__(self, "redshift", 0.0)
+
         norm = 1. / self.spectralMoment(
             lnr        = np.log(8.) - np.log(self.cosmo.h), 
             nu         = 0, 
             j          = 0, 
             normalize  = False, 
         )
+        object.__setattr__(self, "redshift", redshift) # reset redshift value
         return object.__setattr__( self, "norm", norm )
         
 ############################################################################################################
