@@ -6,8 +6,8 @@ from scipy.special import erf
 from typing import TypeVar, Literal
 from dataclasses import dataclass, field
 from astropy.cosmology import FLRW
-from powerspectrum import PowerSpectrum, availableModels as powerspectrum_models
-from halomassfunction import HaloMassFunction, availableModels as massfunction_models
+from .powerspectrum import PowerSpectrum, availableModels as powerspectrum_models
+from .halomassfunction import HaloMassFunction, availableModels as massfunction_models
 
 _T = TypeVar('_T')
 

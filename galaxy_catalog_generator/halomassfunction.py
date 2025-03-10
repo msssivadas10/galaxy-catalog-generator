@@ -3,7 +3,7 @@ from scipy.interpolate import CubicSpline
 from typing import TypeVar, ClassVar, Literal, Any
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from powerspectrum import PowerSpectrum
+from .powerspectrum import PowerSpectrum
 
 _T = TypeVar('_T')
 
