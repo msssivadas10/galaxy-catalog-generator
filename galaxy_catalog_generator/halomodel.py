@@ -5,6 +5,7 @@ from scipy.interpolate import CubicSpline
 from scipy.special import erf
 from typing import TypeVar, Literal
 from dataclasses import dataclass, field
+from itertools import repeat
 from astropy.cosmology import FLRW
 from .powerspectrum import PowerSpectrum, availableModels as powerspectrum_models
 from .halomassfunction import HaloMassFunction, availableModels as massfunction_models
@@ -368,6 +369,7 @@ class HaloModel:
     def generateSatellitePositions(
             self, 
             lnm: float, 
+            pos: tuple[float, float, float],
         ) -> list[NDArray[np.float64]]:
         r"""
         Generate catalogs of satellite galaxies in a halo, given its mass. This catalog will have the X,Y,Z 
@@ -381,15 +383,21 @@ class HaloModel:
             .. note::
                 Sequence of values also accepted.
 
+        pos : tuple[float, float, float], optional
+            Position of the halo in Mpc. If given, the catalog also contains central galaxies, with position  
+            and mass same as the halo.
+
         Returns
         -------
-        cat : ndarray
+        cat : list of ndarray
             Catalog of satellite galaxies in the halo. It can also be an empty array, if the halo do not 
-            have any satellites. 
+            have any satellites. If optional halo position is given, first item is the central galaxy and 
+            the rest (if any) are satellites. If not, only satellites are returned and the position will 
+            be relative to that of halo.  
 
             .. note::
                 If the input is a sequence of mass values, then return value will be a sequence of arrays, 
-                corresponding the each halo.
+                corresponding the each halo. Otherwise, only one array in the returned list.
         
         """
 
@@ -419,16 +427,26 @@ class HaloModel:
         haloConc   = self.haloConcentration(lnm) # halo concentration parameter 
 
         positionList = []
-        for Ns, radH, massH, concH in zip(satelliteN, haloRadius, haloMass, haloConc):
-            if Ns <= 0: continue
+        pos          = repeat(None) if pos is None else pos
+        for Nc, Ns, radH, massH, concH, posH in zip(centralN, satelliteN, haloRadius, haloMass, haloConc, pos):
+            if Ns <= 0: 
+                # If the halo has a central galaxy, add that:
+                if Nc > 0. and posH is not None:
+                    positionList.append(
+                        np.concatenate(
+                            [ [posH], [[massH]] ], # mass in Msun along last column
+                            axis = 1, 
+                        ) 
+                    )
+                continue
             
             # Generating random values corresponding to the distance of the galaxy from the halo center.
             # This follows a distribution matching the NFW profile of the halo density. Sampling is done
             # using the inverse transformation method. 
             u     = self.rng.uniform(size = Ns)
             dist  = ( radH / concH ) * self._cmtable( u * ( np.log(concH + 1) - concH / (concH + 1) ) ) 
-            theta = self.rng.uniform(size = Ns) *   np.pi
-            phi   = self.rng.uniform(size = Ns) * 2*np.pi
+            theta = np.arccos( self.rng.uniform(-1., 1., size = Ns) )
+            phi   = 2*np.pi * self.rng.uniform(size = Ns)
             
             # Satellite galaxy coordinates x, y, and z in Mpc
             satellitePositions = np.array([
@@ -451,6 +469,12 @@ class HaloModel:
                 remainingN  -= len(massAccepted)
                 massValues.append(massAccepted)
             massValues = np.concatenate(massValues) * massH
+
+            # If halo position is also given, then add a central galaxy with same mass as the halo: this 
+            # will be the first item in the list...
+            if posH is not None:
+                satellitePositions = np.vstack([ posH , posH + satellitePositions ])
+                massValues         = np.hstack([ massH, massValues ])
 
             positionList.append(
                 np.concatenate(
