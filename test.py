@@ -22,8 +22,8 @@ def main():
         Delta     = 200,
     )
 
-    haloMass = np.array([ 1e+13, 1e+14 ]) # in Msun
-    satelliteCatalog = hm.generateSatellitePositions( np.log(haloMass) )
+    haloMass = 1e+13 # in Msun
+    satelliteCatalog = hm.generateSatellitePositions( np.log(haloMass), [10., 10., 10.] )
     print(satelliteCatalog)
     return
 
