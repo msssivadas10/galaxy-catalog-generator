@@ -5,7 +5,6 @@ from scipy.interpolate import CubicSpline
 from scipy.special import erf
 from typing import TypeVar, Literal
 from dataclasses import dataclass, field
-from itertools import repeat
 from astropy.cosmology import FLRW
 from .powerspectrum import PowerSpectrum, availableModels as powerspectrum_models
 from .halomassfunction import HaloMassFunction, availableModels as massfunction_models
@@ -361,7 +360,7 @@ class HaloModel:
         """
         ncen = self.centralCount(lnm)
         fsat = (np.exp(lnm) - self.M0) / self.M1
-        fsat[fsat < 0.] = 0.
+        fsat = np.where(fsat < 0., 0., fsat)
         return ncen * fsat**self.alpha
     
     # TODO: subhaloMassFunction 
@@ -369,8 +368,8 @@ class HaloModel:
     def generateSatellitePositions(
             self, 
             lnm: float, 
-            pos: tuple[float, float, float],
-        ) -> list[NDArray[np.float64]]:
+            pos: tuple[float, float, float] = None,
+        ) -> NDArray[np.float64]:
         r"""
         Generate catalogs of satellite galaxies in a halo, given its mass. This catalog will have the X,Y,Z 
         position coordinates in Mpc (first 3 columns) and mass in Msun in the las column.
@@ -379,9 +378,6 @@ class HaloModel:
         ----------
         lnm : float
             Natural logarithm of the mass of the halo in Msun. 
-            
-            .. note::
-                Sequence of values also accepted.
 
         pos : tuple[float, float, float], optional
             Position of the halo in Mpc. If given, the catalog also contains central galaxies, with position  
@@ -389,19 +385,15 @@ class HaloModel:
 
         Returns
         -------
-        cat : list of ndarray
-            Catalog of satellite galaxies in the halo. It can also be an empty array, if the halo do not 
+        cat : ndarray or None
+            Catalog of satellite galaxies in the halo. It can also be ``None`` value, if the halo do not 
             have any satellites. If optional halo position is given, first item is the central galaxy and 
             the rest (if any) are satellites. If not, only satellites are returned and the position will 
             be relative to that of halo.  
-
-            .. note::
-                If the input is a sequence of mass values, then return value will be a sequence of arrays, 
-                corresponding the each halo. Otherwise, only one array in the returned list.
         
         """
 
-        lnm   = np.asarray(lnm, dtype = np.float64).flatten()
+        lnm   = np.asarray(lnm, dtype = np.float64)#.flatten()
         z     = self.redshift
         rho_m = self.mfmodel.rho_m * (1 + z)**3 # Matter density at redshift z
         rho_h = rho_m # Halo density (TODO: chek if the halo density is rho_m * self.Delta)
@@ -426,64 +418,55 @@ class HaloModel:
         haloRadius = np.cbrt( 0.75 / np.pi * ( haloMass / rho_h ) ) # halo lagrangian radius in Mpc
         haloConc   = self.haloConcentration(lnm) # halo concentration parameter 
 
-        positionList = []
-        pos          = repeat(None) if pos is None else pos
-        for Nc, Ns, radH, massH, concH, posH in zip(centralN, satelliteN, haloRadius, haloMass, haloConc, pos):
-            if Ns <= 0: 
-                # If the halo has a central galaxy, add that:
-                if Nc > 0. and posH is not None:
-                    positionList.append(
-                        np.concatenate(
-                            [ [posH], [[massH]] ], # mass in Msun along last column
-                            axis = 1, 
-                        ) 
-                    )
-                continue
-            
-            # Generating random values corresponding to the distance of the galaxy from the halo center.
-            # This follows a distribution matching the NFW profile of the halo density. Sampling is done
-            # using the inverse transformation method. 
-            u     = self.rng.uniform(size = Ns)
-            dist  = ( radH / concH ) * self._cmtable( u * ( np.log(concH + 1) - concH / (concH + 1) ) ) 
-            theta = np.arccos( self.rng.uniform(-1., 1., size = Ns) )
-            phi   = 2*np.pi * self.rng.uniform(size = Ns)
-            
-            # Satellite galaxy coordinates x, y, and z in Mpc
-            satellitePositions = np.array([
-                dist * np.sin(theta) * np.cos(phi), 
-                dist * np.sin(theta) * np.sin(phi),
-                dist * np.cos(theta) 
-            ]).T
+        pos        = None if pos is None else np.asarray(pos)
+        Nc, Ns, radH, massH, concH, posH = centralN, satelliteN, haloRadius, haloMass, haloConc, pos
+        if Ns <= 0: 
+            # If the halo has a central galaxy, add that:
+            if Nc > 0. and posH is not None:
+                return np.concatenate(
+                        [ [posH], [[massH]] ], # mass in Msun along last column
+                        axis = 1, 
+                    ) 
+            return None
+        
+        # Generating random values corresponding to the distance of the galaxy from the halo center.
+        # This follows a distribution matching the NFW profile of the halo density. Sampling is done
+        # using the inverse transformation method. 
+        u     = self.rng.uniform(size = Ns)
+        dist  = ( radH / concH ) * self._cmtable( u * ( np.log(concH + 1) - concH / (concH + 1) ) ) 
+        theta = np.arccos( self.rng.uniform(-1., 1., size = Ns) )
+        phi   = 2*np.pi * self.rng.uniform(size = Ns)
+        
+        # Satellite galaxy coordinates x, y, and z in Mpc
+        satellitePositions = np.array([
+            dist * np.sin(theta) * np.cos(phi), 
+            dist * np.sin(theta) * np.sin(phi),
+            dist * np.cos(theta) 
+        ]).T
 
-            # Assigning random mass values to the satellite galaxies: These masses are drawn from a sub-
-            # halo mass-function having the Schechter form (see <http://arxiv.org/abs/astro-ph/0402500v2>, 
-            # Eqn 1). A rejection sampling is done to generate random values.
-            massValues, remainingN = [], Ns
-            while remainingN > 0:
-                m = ( self.rng.pareto(self.slopeSHMF-1, size = remainingN) + 1. ) * self.Mmin / massH 
-                # NOTE: acceptance probability is calculated for the above mentioned SHMF. If using a power
-                # law with upper cut off, use the Pareto random number with proper scaling to match the 
-                # wanted upper cutoff: that is, reject if mass is above the cutoff and no need to find
-                # the acceptance probability...  
-                massAccepted = m[ self.rng.uniform(size = remainingN) < np.exp( (1. - m) / self.scaleSHMF ) ]
-                remainingN  -= len(massAccepted)
-                massValues.append(massAccepted)
-            massValues = np.concatenate(massValues) * massH
+        # Assigning random mass values to the satellite galaxies: These masses are drawn from a sub-
+        # halo mass-function having the Schechter form (see <http://arxiv.org/abs/astro-ph/0402500v2>, 
+        # Eqn 1). A rejection sampling is done to generate random values.
+        massValues, remainingN = [], Ns
+        while remainingN > 0:
+            m = ( self.rng.pareto(self.slopeSHMF-1, size = remainingN) + 1. ) * self.Mmin / massH 
+            # NOTE: acceptance probability is calculated for the above mentioned SHMF. If using a power
+            # law with upper cut off, use the Pareto random number with proper scaling to match the 
+            # wanted upper cutoff: that is, reject if mass is above the cutoff and no need to find
+            # the acceptance probability...  
+            massAccepted = m[ self.rng.uniform(size = remainingN) < np.exp( (1. - m) / self.scaleSHMF ) ]
+            remainingN  -= len(massAccepted)
+            massValues.append(massAccepted)
+        massValues = np.concatenate(massValues) * massH
 
-            # If halo position is also given, then add a central galaxy with same mass as the halo: this 
-            # will be the first item in the list...
-            if posH is not None:
-                satellitePositions = np.vstack([ posH , posH + satellitePositions ])
-                massValues         = np.hstack([ massH, massValues ])
+        # If halo position is also given, then add a central galaxy with same mass as the halo: this 
+        # will be the first item in the list...
+        if posH is not None:
+            satellitePositions = np.vstack([ posH , posH + satellitePositions ])
+            massValues         = np.hstack([ massH, massValues ])
 
-            positionList.append(
-                np.concatenate(
-                    [ satellitePositions, massValues[:,None] ], # mass in Msun along last column
-                    axis = 1, 
-                ) 
-            )
-
-        # positionList = np.concatenate(positionList, axis = 0)
-        return positionList
-
+        return np.concatenate(
+                [ satellitePositions, massValues[:,None] ], # mass in Msun along last column
+                axis = 1, 
+            ) 
 
