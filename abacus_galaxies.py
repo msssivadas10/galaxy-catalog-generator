@@ -283,6 +283,9 @@ if __name__ == "__main__":
             catpath: str = None, 
             outpath: str = None,
         ) -> None:
+        r"""
+        Generate galaxy catalogs from abacus summit halo catalogs.
+        """
 
         # Configure logger
         logging.config.dictConfig({
