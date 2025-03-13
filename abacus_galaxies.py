@@ -219,9 +219,7 @@ def generateGalaxyCatalog(
         haloID, haloPosition, haloMass = _loadCatalog(file)
         
         logger.info("generating galaxy catalog...")
-        i=1
         for hid, posH, massH in zip(haloID, haloPosition, haloMass):
-            print(f"halo {i} of {len(haloID)}"); i += 1
             galaxyData = haloModel.generateSatellitePositions( np.log(massH), posH )
             if galaxyData is None:
                 continue
