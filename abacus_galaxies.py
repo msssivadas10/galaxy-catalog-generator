@@ -1,5 +1,7 @@
+__version__ = "0.1a"
 
 import os, os.path, glob, re, asdf
+import logging
 import numpy as np
 from numpy.typing import NDArray
 from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog
@@ -28,7 +30,10 @@ _AbacusCosmologySigma8Table = {
     "180": 0.894071, "181": 0.730036, 
 }
 
-def listCatalogs(path: str, /) -> list[str]:
+def _listCatalogs(path: str, /) -> list[str]:
+    r"""
+    List all the files matching to the given path or glob pattern.
+    """
     
     globResult  = glob.glob(path)
     filePattern = re.compile(r"halo_info_(\d+).asdf") # for files like `halo_info_123.asdf`
@@ -45,7 +50,10 @@ def listCatalogs(path: str, /) -> list[str]:
     ]
     return files
 
-def loadCatalog(fn: str, /) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
+def _loadCatalog(fn: str, /) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
+    r"""
+    Load an abacus summit halo catalog file and return the halo id, position (Mpc) and mass (Msun). 
+    """
     
     catalog  = CompaSOHaloCatalog(fn, cleaned = False, fields = ["id", "SO_central_particle", "N"])
     
@@ -75,18 +83,82 @@ def generateGalaxyCatalog(
         powerspectrum: str  = "eisenstein98_zb", 
         massfunction : str  = "tinker08", 
     ) -> None:
+    r"""
+    Generate and save a galaxy catalog using the halo catalog.
+
+    Parameters
+    ----------
+    catpath : path-like
+        Path to the halo catalog file. If a glob pattern is given, use all files matching the pattern.
+
+    outpath : path-like
+        Path to the location to save the galaxy catalog files. These files have the prefix `galaxy_info_`
+        followed by the 3-digit index corresponding to the halo catalog files.
+
+        .. note:: 
+            
+            This requires not two halo catalog files to have the same index.
+    
+    Mmin : float
+        Specify the minimum mass (in Msun) for the halo to have at least one central galaxy. Same value is 
+        used to check if the subhalo contain any (satellite) galaxy. 
+
+    sigmaM : float
+        Width of the central galaxy transition range. A value of 0 means the relation is a step function.
+
+    M0 : float
+        Minimum mass (in Msun) for halo to have satellite galaxies.
+    
+    M1 : float
+        Scale factor for power law satelliete count relation (unit is Msun).
+
+    alpha : float
+        Index for the  power law satelliete count relation
+
+    scaleSHMF : float
+        Scale parameter for the subhalo mass-function. For a halo of mass M, ``m = beta*M`` gives the mass
+        of the galaxy where the the function starts declining exponentially. 
+
+    slopeSHMF : float
+        Slope parameter for the subhalo mass-function.
+
+    powerspectrum : str, default=`'eisenstein98_zb'`
+        Power spectrum model to use. Parameters are taken from the simulation header.
+
+    massfunction : str, default=`'tinker08'`
+        Halo mass-function model to use. Parameters are taken from the simulation header.
+    
+    Notes
+    -----
+    Each generated galaxy catalog have a `header` field, containing a dict of the simulation metadata and 
+    the values of various parameters used, and a `data` field containing the galaxy data:
+
+    - `'parentHaloID'`: 64 bit integer id of the parent halo of the galaxy.
+    
+    - `'galaxyPosition'`: galaxy position in Mpc/h
+
+    - `'galaxyMass'`: galaxy mass in Msun/h
+
+    - `'galaxyType'`: an 8 bit integer indicating the galaxy type. 1 for central galaxy and 2 for satellite.  
+    
+    """
+    
+    logger = logging.getLogger()
 
     # Check if the output path is existing or not: create it if not exist: NOTE: use paths to folder 
-    if not os.path.exists(outpath):
-        os.makedirs(outpath)
+    outpath = os.path.abspath(outpath) 
+    if os.path.exists(outpath): logger.info(f"output path exists: {outpath!r}")
+    os.makedirs(outpath, exist_ok = True)
 
     # List all catalog files in the given path:
-    files = listCatalogs(catpath)
+    files = _listCatalogs(catpath)
+    logger.info(f"listed {len(files)} with path pattern {catpath!r}")
     if not files: return
 
     # Read the first catalog file and load the header data. This is used for initialising cosmology 
     # nad halo model objects and is saved on each galaxy catalog files:
     catalogHeader = {}
+    logger.info(f"loading header data from file: {files[0]!r}...")
     with asdf.open(files[0]) as af:
         catalogHeader.update( af["header"] )
 
@@ -113,6 +185,7 @@ def generateGalaxyCatalog(
     
     # Using the parameters from the simulation metadata and given halo model parameters, create
     # the halo model object for generating galaxy catalogs:  
+    logger.info(f"creating halo model object...")
     haloModel = HaloModel.create(
         Mmin, 
         sigmaM, 
@@ -140,52 +213,125 @@ def generateGalaxyCatalog(
 
     filePattern = re.compile(r"halo_info_(\d+).asdf") # for files like `halo_info_123.asdf`
     for file in files:
-        parentHaloID, galaxyPositions, galaxyMass = [], [], []
+        parentHaloID, galaxyPositions, galaxyMass, galaxyType = [], [], [], []
 
-        haloID, haloPosition, haloMass = loadCatalog(file)
-        for id, posH, massH in enumerate(haloID, haloPosition, haloMass):
+        logger.info(f"loading halo catalog from file: {file!r}")
+        haloID, haloPosition, haloMass = _loadCatalog(file)
+        
+        logger.info("generating galaxy catalog...")
+        i=1
+        for hid, posH, massH in zip(haloID, haloPosition, haloMass):
+            print(f"halo {i} of {len(haloID)}"); i += 1
             galaxyData = haloModel.generateSatellitePositions( np.log(massH), posH )
             if galaxyData is None:
                 continue
 
-            parentHaloID.append( np.repeat(id, repeats = galaxyData.shape[0]) )
+            parentHaloID.append( np.repeat(hid, repeats = galaxyData.shape[0]) )
             galaxyPositions.append( galaxyData[:, 0:3] )
             galaxyMass.append( galaxyData[:, 3] )
 
-        parentHaloID    = np.hstack(parentHaloID)
-        galaxyPositions = np.vstack(galaxyPositions)
-        galaxyMass      = np.hstack(galaxyMass)
+            # Central galaxies are given the type number 1 and satellite galaxies 2 for easily 
+            # identifying them from the catalog...
+            galaxyType.append(np.array( [1] + [2] * (galaxyData.shape[0]-1), dtype = np.uint8 ))
 
-        outfile = os.path.join(
+
+        hubble          = 0.01*catalogHeader["H0"]
+        parentHaloID    = np.hstack(parentHaloID)
+        galaxyPositions = np.vstack(galaxyPositions) * hubble # galaxy position in Mpc/h
+        galaxyMass      = np.hstack(galaxyMass)      * hubble # galaxy mass in Msun/h
+        galaxyType      = np.hstack(galaxyType)
+        
+        # Wrapping around the coordinates that falls outside the simulation boxsize, with a 
+        # periodic boundary condition, as in the original simulation...
+        boxsize = catalogHeader["BoxSize"]
+        galaxyPositions = ( galaxyPositions + 0.5*boxsize ) % boxsize - 0.5*boxsize
+
+        outputFile = os.path.join(
             outpath, 
             f"galaxy_info_{ filePattern.match(os.path.basename(file)).group(1) }.asdf", 
         )
+        logger.info(f"saving catalog to file: {outputFile!r}")
         af = asdf.AsdfFile({
             "header": catalogHeader, 
             "data"  : {
-                "parentHaloID": parentHaloID, 
-                "positionMpc" : galaxyPositions, 
-                "massMsun"    : galaxyMass, 
+                "parentHaloID"  : parentHaloID, 
+                "galaxyPosition": galaxyPositions, 
+                "galaxyMass"    : galaxyMass, 
+                "galaxyType"    : galaxyType,
             }
         })
-        af.write_to(outfile, all_array_compression = 'zlib')
+        af.write_to(outputFile, all_array_compression = 'zlib')
         af.close()
-        
+
+    logger.info("galaxy catalog generation completed! :)")
     return
 
+############################################################################################################
 
-# TODO: main function: cli
+# main function: cli
+if __name__ == "__main__":
 
+    import click, yaml, inspect, logging.config
 
-# XXX: **test**
-generateGalaxyCatalog(
-    catpath   = os.path.abspath("../cosmo-calc/workspace/z2.000/halo_info/halo_info_*.asdf"), 
-    outpath   = os.path.abspath("../galaxy_catalog/z2.000/"), 
-    Mmin      = 1e+08, 
-    sigmaM    = 0., 
-    M0        = 1e+06, 
-    M1        = 1e+12, 
-    alpha     = 0.3, 
-    scaleSHMF = 0.39, 
-    slopeSHMF = 1.91, 
-)
+    @click.command
+    @click.version_option(__version__, message = "Abacus Count %(version)s") # Add --version
+    @click.argument('params' , type = click.Path(exists = True))
+    @click.option("--catpath", type = click.Path(exists = False), help = "Path to the halo catalog file(s)")
+    @click.option("--outpath", type = click.Path(exists = False), help = "Path to the save galaxy catalogs")
+    def _cli(
+            params : str, 
+            catpath: str = None, 
+            outpath: str = None,
+        ) -> None:
+
+        # Configure logger
+        logging.config.dictConfig({
+            'version': 1, 
+            'disable_existing_loggers': True, 
+            'formatters': {
+                'default': { 'format': '[ %(asctime)s %(levelname)s %(process)d ] %(message)s' }
+            }, 
+            'handlers': {
+                'stream': {
+                    'level': 'INFO', 
+                    'formatter': 'default', 
+                    'class': 'logging.StreamHandler', 
+                    'stream': 'ext://sys.stdout'
+                }, 
+                'file': {
+                    'level': 'INFO', 
+                    'formatter': 'default', 
+                    'class': 'logging.handlers.RotatingFileHandler', 
+                    'filename': '.'.join([ os.path.basename(__file__).rsplit('.', 1)[0], "log" ]), 
+                    'mode': 'a', 
+                    'maxBytes': 2097152, # create a new file if size exceeds 2 MiB
+                    'backupCount': 4     # use maximum 4 files
+                }
+            }, 
+            'loggers': {
+                'root': {
+                    'level': 'INFO', 
+                    'handlers': [
+                        'stream', 
+                        'file'
+                    ]
+                }
+            }
+        })
+
+        # Load parameters from the file
+        with open(params, 'r') as fp:
+            args = yaml.safe_load(fp)
+
+        assert isinstance(args, dict), "configuration file must contain key-value pairs"
+        args = {
+            key: value 
+                for key, value in args.items() 
+                    if key in inspect.signature(generateGalaxyCatalog).parameters
+        }
+        args["catpath"] = catpath or args.get( "catpath", None ) 
+        args["outpath"] = outpath or args.get( "outpath", None )
+
+        return generateGalaxyCatalog(**args)
+    
+    _cli()
