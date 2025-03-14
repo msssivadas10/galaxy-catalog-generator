@@ -1,5 +1,5 @@
 # Central galaxy count parameters
-Mmin: 1.0e+08
+Mmin: 1.0e+12
 sigmaM: 0.0 
 
 # Satellite galaxy count parameters
