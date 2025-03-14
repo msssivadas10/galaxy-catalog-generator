@@ -287,14 +287,20 @@ if __name__ == "__main__":
     @click.argument('params' , type = click.Path(exists = True))
     @click.option("--catpath", type = click.Path(exists = False), help = "Path to the halo catalog file(s)")
     @click.option("--outpath", type = click.Path(exists = False), help = "Path to the save galaxy catalogs")
+    @click.option("--warn/--no-warn", default = False,            help = "Enable or disable warnings"      )
     def _cli(
             params : str, 
-            catpath: str = None, 
-            outpath: str = None,
+            catpath: str  = None, 
+            outpath: str  = None,
+            warn   : bool = False,
         ) -> None:
         r"""
         Generate galaxy catalogs from abacus summit halo catalogs.
         """
+
+        if not warn:
+            import warnings
+            warnings.catch_warnings(action="ignore")
 
         # Configure logger
         logging.config.dictConfig({
