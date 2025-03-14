@@ -219,11 +219,15 @@ def generateGalaxyCatalog(
         haloID, haloPosition, haloMass = _loadCatalog(file)
         
         logger.info("generating galaxy catalog...")
+        halosPerFile, cgalaxyPerFile, sgalaxyPerFile = 0, 0, 0
         for hid, posH, massH in zip(haloID, haloPosition, haloMass):
-            galaxyData = haloModel.generateSatellitePositions( np.log(massH), posH )
+            halosPerFile += 1
+            galaxyData    = haloModel.generateSatellitePositions( np.log(massH), posH )
             if galaxyData is None:
                 continue
 
+            cgalaxyPerFile += 1
+            sgalaxyPerFile += galaxyData.shape[0]-1
             parentHaloID.append( np.repeat(hid, repeats = galaxyData.shape[0]) )
             galaxyPositions.append( galaxyData[:, 0:3] )
             galaxyMass.append( galaxyData[:, 3] )
@@ -232,6 +236,8 @@ def generateGalaxyCatalog(
             # identifying them from the catalog...
             galaxyType.append(np.array( [1] + [2] * (galaxyData.shape[0]-1), dtype = np.uint8 ))
 
+        galaxyPercentage = 100 * ( cgalaxyPerFile / halosPerFile )
+        logger.info(f"placed galaxies in {cgalaxyPerFile} out of {halosPerFile} halos ({galaxyPercentage:.3f}%)")
 
         hubble          = 0.01*catalogHeader["H0"]
         parentHaloID    = np.hstack(parentHaloID)
@@ -250,8 +256,13 @@ def generateGalaxyCatalog(
         )
         logger.info(f"saving catalog to file: {outputFile!r}")
         af = asdf.AsdfFile({
-            "header": catalogHeader, 
-            "data"  : {
+            "header"    : catalogHeader, 
+            "statistics": {
+                "halosProcessed"   : halosPerFile, 
+                "centralGalaxies"  : cgalaxyPerFile, 
+                "satelliteGalaxies": sgalaxyPerFile,
+            },
+            "data"      : {
                 "parentHaloID"  : parentHaloID, 
                 "galaxyPosition": galaxyPositions, 
                 "galaxyMass"    : galaxyMass, 
