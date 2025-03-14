@@ -444,20 +444,24 @@ class HaloModel:
             dist * np.cos(theta) 
         ]).T
 
-        # Assigning random mass values to the satellite galaxies: These masses are drawn from a sub-
-        # halo mass-function having the Schechter form (see <http://arxiv.org/abs/astro-ph/0402500v2>, 
-        # Eqn 1). A rejection sampling is done to generate random values.
-        massValues, remainingN = [], Ns
-        while remainingN > 0:
-            m = ( self.rng.pareto(self.slopeSHMF-1, size = remainingN) + 1. ) * self.Mmin / massH 
-            # NOTE: acceptance probability is calculated for the above mentioned SHMF. If using a power
-            # law with upper cut off, use the Pareto random number with proper scaling to match the 
-            # wanted upper cutoff: that is, reject if mass is above the cutoff and no need to find
-            # the acceptance probability...  
-            massAccepted = m[ self.rng.uniform(size = remainingN) < np.exp( (1. - m) / self.scaleSHMF ) ]
-            remainingN  -= len(massAccepted)
-            massValues.append(massAccepted)
-        massValues = np.concatenate(massValues) * massH
+        # Assigning random mass values to the satellite galaxies: These masses are drown from a bounded 
+        # pareto distribution, with bounds [Mmin, scaleSHMF*massH] and slope given by slopeSHMF. 
+        # NOTE: using inverse transform sampling <https://en.wikipedia.org/wiki/Pareto_distribution>
+        Ha, La     = self.scaleSHMF**self.slopeSHMF, (self.Mmin / massH)**self.slopeSHMF
+        massValues = massH * ( 
+            -( self.rng.uniform(size = Ns) * ( Ha - La ) - Ha ) / ( Ha * La )
+         )**( -1. / self.slopeSHMF )
+
+        # Another choise for the mass distribution will be a subhalo mass-function having the Schechter  
+        # form (see <http://arxiv.org/abs/astro-ph/0402500v2>, Eqn 1). This requires rejection sampling 
+        # with a pareto distribution as the initial distribution.
+        # massValues, remainingN = [], Ns
+        # while remainingN > 0:
+        #     m = ( self.rng.pareto(self.slopeSHMF-1, size = remainingN) + 1. ) * self.Mmin / massH 
+        #     massAccepted = m[ self.rng.uniform(size = remainingN) < np.exp( (1. - m) / self.scaleSHMF ) ]
+        #     remainingN  -= len(massAccepted)
+        #     massValues.append(massAccepted)
+        # massValues = np.concatenate(massValues) * massH
 
         # If halo position is also given, then add a central galaxy with same mass as the halo: this 
         # will be the first item in the list...
