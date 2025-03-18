@@ -186,7 +186,7 @@ class HaloModel:
 
     def createConcMassInterpolationTable(
             self, 
-            crange : tuple[float, float] = (0., 2.), 
+            crange : tuple[float, float] = (-3., 2), 
             tabsize: int = 64,
         ) -> None:
         r"""
@@ -196,13 +196,13 @@ class HaloModel:
         Parameters
         ----------
         crange : (float, float), default=(0, 2)
-            Specify the range of values for c to create the table.
+            Specify the range of values for log10(c) to create the table.
         
         tabsize : int, default=64
             Size of the table.
 
         """
-        c = np.linspace( crange[0], crange[1], tabsize )
+        c = np.logspace( crange[0], crange[1], tabsize )
         f = np.log(1 + c) - c / (1 + c)
         cmtable = CubicSpline(f, c)
         return object.__setattr__( self, "_cmtable", cmtable )
