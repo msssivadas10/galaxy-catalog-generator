@@ -8,6 +8,8 @@ from astropy.cosmology import FlatLambdaCDM, w0waCDM
 from galaxy_catalog_generator.halomodel import HaloModel
 
 def testGalaxyCatalogGeneration():
+    # Test galaxy catalog generation
+
     hm = HaloModel.create(
         Mmin      = 1e+08, 
         sigmaM    = 0., 
@@ -31,6 +33,8 @@ def testGalaxyCatalogGeneration():
     return
 
 def setupLoading(path):
+    # List all halo catalog files, load heade section from the file and create a halo model with the 
+    # loaded parameters.
 
     files = glob.glob( path )
 
@@ -67,6 +71,7 @@ def setupLoading(path):
     return files, unitMass, hubble, hm
 
 def testGalaxyCounts():
+    # Calculate the average galaxy counts (central and satellite) and save the plot. 
 
     files, unitMass, hubble, hm = setupLoading( "../test-data/galaxy_catalog/z3.000/galaxy_info_*.asdf" )
 
@@ -77,7 +82,8 @@ def testGalaxyCounts():
     satelliteCount = np.zeros(massH.shape)
     for file in files:
         with asdf.open(file) as af:
-
+            
+            # For finding the central galaxies and grouping satellites around them...
             uniqueIDs, centralIndex, inverseIndex = np.unique( 
                 af["data"]["parentHaloID"], 
                 return_index   = True, 
@@ -130,7 +136,8 @@ def testGalaxyCounts():
 
     return
 
-def _testSatellieMassFunction(massH):
+def _testSatelliteMassFunction(massH):
+    # Calculate the subhalo mass-function for a halo mass and compare with the model.
 
     files, unitMass, hubble, hm = setupLoading( "../test-data/galaxy_catalog/z3.000/galaxy_info_*.asdf" )
 
@@ -177,13 +184,14 @@ def _testSatellieMassFunction(massH):
 
     return hm, fracMass, satelliteMassFunction, satelliteMassFunctionExp
 
-def testSatellieMassFunction():
-    
+def testSatelliteMassFunction():
+    # Calculate the satellite mass-function and save the plot. 
+
     fig = plt.figure()
     plt.loglog()
 
     for massH, colour in  [(5e+12, "green"), (1e+13, "tab:blue"), (5e+13, "red")]:
-        hm, fracMass1, satelliteMassFunction1, satelliteMassFunctionExp1 = _testSatellieMassFunction(massH)
+        hm, fracMass1, satelliteMassFunction1, satelliteMassFunctionExp1 = _testSatelliteMassFunction(massH)
         plt.plot( fracMass1, satelliteMassFunction1   , 's' , color = colour )
         plt.plot( fracMass1, satelliteMassFunctionExp1, '-.', color = colour )
         plt.plot( [], [], '-s', color = colour, label = f"{massH:.3g}" )
@@ -191,7 +199,6 @@ def testSatellieMassFunction():
     plt.legend(ncols = 3)
     plt.xlabel("Galaxy - Halo mass ratio")
     plt.ylabel("PDF")
-    
     plt.grid()
     # plt.show()
     fig.savefig("../test-data/images/galaxy_mass_pdf_hugebase_z3.png")
@@ -199,6 +206,7 @@ def testSatellieMassFunction():
     return
 
 def _testHaloProfile(massH):
+    # Calculate the halo density profile for a halo mass and compare with the model.
 
     files, unitMass, hubble, hm = setupLoading( "../test-data/galaxy_catalog/z3.000/galaxy_info_*.asdf" )
 
@@ -251,6 +259,7 @@ def _testHaloProfile(massH):
     return hm, distGH, haloProfile, haloProfileExp
 
 def testHaloProfile():
+    # Calculate the halo density profile and save the plot. 
 
     fig = plt.figure()
     plt.loglog()
@@ -264,7 +273,6 @@ def testHaloProfile():
     plt.legend(ncols = 3)
     plt.xlabel("distance [Mpc/h]")
     plt.ylabel("$r^2 \\rho(r)$")
-    
     plt.grid()
     # plt.show()
     fig.savefig("../test-data/images/halo_profile_nfw_hugebase_z3.png")
@@ -274,7 +282,7 @@ def testHaloProfile():
 if __name__ == "__main__":
     # testGalaxyCatalogGeneration()
     # testGalaxyCounts()
-    # testSatellieMassFunction()
+    # testSatelliteMassFunction()
     testHaloProfile()
 
 # a, b = 0.1, 0.5
