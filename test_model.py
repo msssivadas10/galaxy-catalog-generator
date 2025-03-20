@@ -14,7 +14,7 @@ hm = HaloModel.create(
     alpha     = 0.3, 
     scaleSHMF = 0.50, 
     slopeSHMF = 2.00, 
-    redshift  = 0.,
+    redshift  = 3.,
     cosmo     = FlatLambdaCDM(H0 = 70., Om0 = 0.3, Ob0 = 0.05, Tcmb0 = 2.725), 
     psmodel   = "eisenstein98_zb", 
     mfmodel   = "tinker08", 
