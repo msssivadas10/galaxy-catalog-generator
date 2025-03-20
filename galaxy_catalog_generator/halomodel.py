@@ -2,6 +2,7 @@ import numpy as np
 from numpy.random import default_rng, Generator
 from numpy.typing import NDArray
 from scipy.interpolate import CubicSpline
+from scipy.integrate import quad
 from scipy.special import erf
 from typing import TypeVar, Literal
 from dataclasses import dataclass, field
@@ -210,6 +211,10 @@ class HaloModel:
     def __post_init__(self) -> None:
         self.createConcMassInterpolationTable()
         return
+    
+    ########################################################################################################
+    #                                               MODELS                                                 #
+    ########################################################################################################
 
     def sigma(
             self, 
@@ -243,7 +248,7 @@ class HaloModel:
         """
         return self.mfmodel.sigma(lnm, return_derivative = return_derivative, interpolated = interpolated)
     
-    def massFunction(
+    def haloMassFunction(
             self, 
             lnm: _T, 
             return_value: Literal["dndlogm", "dndlnm", "dndm", "fs"] = "dndlogm", 
@@ -363,7 +368,44 @@ class HaloModel:
         fsat = np.where(fsat < 0., 0., fsat)
         return ncen * fsat**self.alpha
     
-    # TODO: subhaloMassFunction 
+    def subhaloMassFunction(
+            self, 
+            x: _T,
+            lnm: float,
+        ) -> _T:
+        r"""
+        Calculate the subhalo mass-function for given halo mass.
+
+        Parameters
+        ----------
+        x : array_like
+            Mass of the subhalo as fraction of the parent halo.
+
+        lnm : float
+            Natural logarithm of the mass of the halo in Msun. 
+
+        Returns
+        -------
+        shmf : array_like
+            Value of the subhalo mass-function, without normalization. This correspond to the probability 
+            distribution of the sub-halo mass values. Multiply this with the correct normalization factor 
+            to get the actual mass-function.
+
+        """
+        xMin, xMax = (self.Mmin / np.exp(lnm)), self.scaleSHMF
+        slope      = self.slopeSHMF
+        factor     = slope*xMin**slope / ( 1 - (xMin / xMax)**slope )
+
+        x = np.asarray(x, dtype = np.float64)
+        validRange = ( x >= xMin ) & ( x <= xMax )
+
+        y = np.zeros_like(x)
+        y[ validRange ] = factor * x[ validRange ]**(-slope - 1) 
+        return y
+    
+    ########################################################################################################
+    #                                       GALAXY CATALOG GENERATION                                      #
+    ########################################################################################################
     
     def generateSatellitePositions(
             self, 
@@ -473,4 +515,120 @@ class HaloModel:
                 [ satellitePositions, massValues[:,None] ], # mass in Msun along last column
                 axis = 1, 
             ) 
+    
+    ########################################################################################################
+    #                                   AVERAGE DENSITY CALCULATION                                        #
+    ########################################################################################################
+    
+    def averageHaloDensity(
+            self, 
+            lnma: float = None,
+            lnmb: float = np.log(1e+18),
+        ) -> float:
+        r"""
+        Return the average halo number density at current redshift.
+
+        Parameters
+        ----------
+        lnma : float, optional
+            Lower limit for halo mass (natural log of value in Msun). If not specified, a value 4 sigma 
+            units lower than the minimum mass for galaxy formation is used.
+
+        lnmb : float, default=log(1e+18)
+            Upper limit for halo mass (natural log of value in Msun).
+
+        Returns
+        -------
+        retval : float
+            Halo number density in Mpc^-3.
+
+        """
+
+        # Integration limits: lower limit is calculated 4 sigma units below the minimum mass.
+        a = lnma or np.log( self.Mmin - 4*self.sigmaM )
+        b = lnmb
+        assert a < b, "lower limit must be less than upper limit"
+
+        retval, abserr = quad(
+            self.haloMassFunction, 
+            a    = a, 
+            b    = b,
+            args = ( "dndlnm", )
+        )
+        return retval
+
+    def averageGalaxyDensity(
+            self, 
+            lnma: float = None,
+            lnmb: float = np.log(1e+18),
+        ) -> float:
+        r"""
+        Return the average galaxy number density at current redshift.
+
+        Parameters
+        ----------
+        lnma : float, optional
+            Lower limit for halo mass (natural log of value in Msun). If not specified, a value 4 sigma 
+            units lower than the minimum mass for galaxy formation is used.
+
+        lnmb : float, default=log(1e+18)
+            Upper limit for halo mass (natural log of value in Msun).
+
+        Returns
+        -------
+        retval : float
+            Galaxy number density in Mpc^-3.
+             
+        """
+
+        # Integration limits: lower limit is calculated 4 sigma units below the minimum mass.
+        a = lnma or np.log( self.Mmin - 4*self.sigmaM )
+        b = lnmb
+        assert a < b, "lower limit must be less than upper limit"
+
+        def integrand(lnm: float) -> float:
+            galaxyCount = self.centralCount(lnm) + self.satelliteCount(lnm)
+            return galaxyCount * self.haloMassFunction(lnm, return_value = "dndlnm")
+
+        retval, abserr = quad( integrand, a = a, b = b )
+        return retval
+
+    def averageSatelliteFraction(
+            self, 
+            lnma: float = None,
+            lnmb: float = np.log(1e+18),
+        ) -> float:
+        r"""
+        Return the average satellite galaxy number density at current redshift, as a fraction of the halo 
+        number density.
+
+        Parameters
+        ----------
+        lnma : float, optional
+            Lower limit for halo mass (natural log of value in Msun). If not specified, a value 4 sigma 
+            units lower than the minimum mass for galaxy formation is used.
+
+        lnmb : float, default=log(1e+18)
+            Upper limit for halo mass (natural log of value in Msun).
+
+        Returns
+        -------
+        retval : float
+            Satellite galaxy number fraction.
+             
+        """
+
+        # Integration limits: lower limit is calculated 4 sigma units below the minimum mass.
+        a = lnma or np.log( self.Mmin - 4*self.sigmaM )
+        b = lnmb
+        assert a < b, "lower limit must be less than upper limit"
+
+        def integrand(lnm: float) -> float:
+            galaxyCount = self.satelliteCount(lnm)
+            return galaxyCount * self.haloMassFunction(lnm, return_value = "dndlnm")
+
+        retval, abserr = quad( integrand, a = a, b = b )
+        return retval / self.averageHaloDensity(lnma, lnmb)
+    
+
 
