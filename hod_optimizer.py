@@ -1,6 +1,10 @@
+# 
+# Calculate optimum HOD parameters to get galaxy density and satellite fraction matching observation.
+#
+
 __version__ = "0.1a"
 
-import os, os.path
+import logging
 import numpy as np
 from scipy.optimize import minimize
 from astropy.cosmology import w0waCDM
@@ -28,17 +32,44 @@ _AbacusCosmologySigma8Table = {
     "180": 0.894071, "181": 0.730036, 
 }
 
-def _buildFromAbacusSimulation(
-        simname: str, 
-        redshift: float,
-        M0           : float = None, 
-        sigmaM       : float =  0.0, 
-        alpha        : float =  1.0, 
-        scaleSHMF    : float =  0.5, 
-        slopeSHMF    : float = -2.0, 
-        powerspectrum: str  = "eisenstein98_zb", 
-        massfunction : str  = "tinker08",  
+def buildFromAbacusSimulation(
+        simname      : str, 
+        redshift     : float,
+        sigmaM       : float = 0.0, 
+        alpha        : float = 1.0, 
+        powerspectrum: str   = "eisenstein98_zb", 
+        massfunction : str   = "tinker08",  
     ) -> HaloModel:
+    r"""
+    Create a partially initialized halo model object using the cosmology parameters from the simulation. 
+    Here ``M0`` is taken the same as ``Mmin``.
+
+    Parameters
+    ----------
+    simname : str
+        Name of the abacus simulation. 
+
+    redshift : float
+        Redshift for the simulation snapshot. This will raise error if the value is not available. 
+
+    sigmaM : float default=0.0
+        Width of the central galaxy transition range. A value of 0 means the relation is a step function.
+
+    alpha : float, default=1.0
+        Index for the  power law satelliete count relation.
+
+    powerspectrum : str, default=`'eisenstein98_zb'`
+        Power spectrum model to use. Parameters are taken from the simulation header.
+
+    massfunction : str, default=`'tinker08'`
+        Halo mass-function model to use. Parameters are taken from the simulation header.
+
+    Returns
+    -------
+    halomodel : HaloModel
+        A partially initialised halo model object, without ``Mmin``, ``M0`` and ``M1`` parameters. 
+    
+    """
 
     import re
     from abacusnbody.metadata import get_meta
@@ -60,11 +91,11 @@ def _buildFromAbacusSimulation(
     halomodel = HaloModel.create(
         Mmin      = -1,       # Mmin is calculated later...
         sigmaM    = sigmaM, 
-        M0        = M0 or -1, # Use M0 = Mmin, if not specified
+        M0        = -1,       # using M0 = Mmin
         M1        = -1,       # M1 is calculated later...
         alpha     = alpha, 
-        scaleSHMF = scaleSHMF, 
-        slopeSHMF = slopeSHMF, 
+        scaleSHMF = 0.5,      # values of sub-halo mass-function parameters do not affect other ...
+        slopeSHMF = 2.0,      # HOD parameters: so a convenient value is set. 
         redshift  = header["Redshift"], 
         cosmo     = w0waCDM(
             H0    = header["H0"], 
@@ -83,20 +114,41 @@ def _buildFromAbacusSimulation(
     )
     return halomodel
 
-def _scoreFunction(
+def scoreFunction(
         x: tuple[float, float], 
         halomodel         : HaloModel,
         galaxy_density    : float, 
         satellite_fraction: float,
-        return_model      : bool = False, 
     ) -> float:
+    r"""
+    A estimate for the weighted difference of the calculated and required galaxy density and satellite 
+    fraction values.
+
+    Parameters
+    ----------  
+    x : tuple[float, float]
+
+    halomodel : HaloModel
+        Halo model object to use for calculations. All HOD parameters must be set.
+
+    galaxy_density : float 
+        Reference value for galaxy density at current redshift, in Mpc^-3 units.
+
+    satellite_fraction : float
+        Reference value for satellite fraction at current redshift.
+
+    Returns
+    -------
+    score : float
+        Log of the weighted difference. 
+
+    """
 
     # Set the HOD paramters t the model
     Mmin, M1 = np.exp(x)
     object.__setattr__(halomodel, "Mmin", Mmin)
     object.__setattr__(halomodel, "M1"  , M1  )
-    if halomodel.M0 < 0: 
-        object.__setattr__(halomodel, "M0"  , Mmin)
+    object.__setattr__(halomodel, "M0"  , Mmin)
 
     # Relative diffrence in galaxy density
     deltaG = ( halomodel.averageGalaxyDensity( lnmb = np.log(1e+18) ) / galaxy_density - 1. )**2
@@ -106,8 +158,6 @@ def _scoreFunction(
     
     # Total score: weighted distance from observed and calculated values
     score = np.log( deltaG + deltaS + 1e-16 ) 
-    if return_model:
-        return halomodel
     return score
 
 def optimizeHaloModel(
@@ -118,8 +168,41 @@ def optimizeHaloModel(
         M1_range          : tuple[float, float] = ( 1e+13, 1e+15 ),
         gridsize          : int = 12, 
     ) -> HaloModel:
+    r"""
+    Optimize the HOD parameters ``Mmin`` and ``M1`` to match the calculated values of galaxy density and 
+    satellite fraction with their required values.
+
+    Parameters
+    ----------
+    halomodel : HaloModel
+        Partially initialised halo model object. 
+
+    galaxy_density : float 
+        Required value for galaxy density at current redshift, in Mpc^-3 units.
+
+    satellite_fraction : float
+        Required value for satellite fraction at current redshift.
+
+    Mmin_range : tuple[float, float], default=( 1e+12, 1e+14 )
+        Search range for the parameter ``Mmin``. Value is in Msun units.
+    
+    M1_range : tuple[float, float], default=( 1e+13, 1e+15 )
+        Search range for the parameter ``M1``. Value is in Msun units.
+
+    gridsize : int, default=12
+        Size of the grid used to get initial guess.
+
+    Returns
+    -------
+    halomodel : HaloModel
+        Fully initialised halo model object with optimized HOD parameters. ``M0`` is same as ``Mmin``.
+
+    """
+
+    logger = logging.getLogger()
 
     # Creating the grid: this is used to locate the initial guess for the minimum
+    logger.debug("generating grid...")
     ( xa, xb ), ( ya, yb ) = Mmin_range, M1_range
     x, y = np.meshgrid(
         np.linspace( np.log( xa ), np.log( xb ), gridsize ), # Mmin values
@@ -128,7 +211,7 @@ def optimizeHaloModel(
     scoreGrid = np.zeros_like(x)
     for i in range( scoreGrid.shape[0] ):
         for j in range( scoreGrid.shape[1] ):
-            scoreGrid[i, j] = _scoreFunction(
+            scoreGrid[i, j] = scoreFunction(
                 ( x[i, j], y[i, j] ), 
                 halomodel, 
                 galaxy_density, 
@@ -141,12 +224,14 @@ def optimizeHaloModel(
 
     # Minimizing the score function to get the optimum values: NOTE: by default, search is done in the  
     # interval Mmin in [ 1e+12, 1e+13 ] and M1 in [ 1e+13, 1e+15 ].
+    logger.debug(f"optimizing for Mmin and M1 with guess ({x0=:.3f}, {y0=:.3f})...")
+    logger.debug(f"using Mmin range [{xa:.3e}, {xb:.3e}] and M1 range [{ya:.3e}, {yb:.3e}]...")
     res = minimize(
-        _scoreFunction, 
+        scoreFunction, 
         x0     = [ x0, y0 ], 
         bounds = [
-            ( np.log(1e+12), np.log(1e+13) ), # Mmin range
-            ( np.log(1e+13), np.log(1e+15) ), # M1 range
+            ( np.log(xa), np.log(xb) ), # Mmin range
+            ( np.log(ya), np.log(yb) ), # M1 range
         ], 
         args   = ( 
             halomodel, 
@@ -155,23 +240,79 @@ def optimizeHaloModel(
          )
     )
     if not res.success:
-        import warnings
-        warnings.warn( f"Optimization failed with messagee {res.message!r} after {res.nit} iterations" )
+        logger.warning( f"optimization failed with messagee {res.message!r} after {res.nit} iterations" )
 
     # Set the optimum values to the halo model
-    score = _scoreFunction(
+    score = scoreFunction(
         res.x, 
         halomodel, 
         galaxy_density, 
         satellite_fraction, 
-        return_model = True, 
     )
-    print(f"Final score: {score:.4g}")
-    print(f" - Galaxy density = {halomodel.averageGalaxyDensity():.3e} Mpc^-3")
-    print(f" - Satellite fraction = {halomodel.averageSatelliteFraction():.3g}") 
+    logger.debug(f"optimum values: Mmin={halomodel.Mmin:.3e} Msun, M1={halomodel.M1:.3e} Msun")
+    logger.debug(f"Final score: {score:.4g}")
+    logger.debug(f"Galaxy density: {halomodel.averageGalaxyDensity():.3e} Mpc^-3")
+    logger.debug(f"Satellite fraction: {halomodel.averageSatelliteFraction():.3g}") 
     return halomodel
 
+if __name__ == "__main__":
 
+    import click
 
-halomodel = _buildFromAbacusSimulation("AbacusSummit_hugebase_c000_ph000", 3.)
-print( halomodel )
+    @click.command
+    @click.version_option(__version__, message = "HOD Optimizer %(version)s") # Add --version
+    @click.option("--simname"  , type = str  ,                              help = "Name of abacus simulation"      )
+    @click.option("--redshift" , type = float,                              help = "Redshift of the snapshots"      )
+    @click.option("--galdens"  , type = float,                              help = "target galaxy density in Mpc^-3")
+    @click.option("--satfrac"  , type = float,                              help = "Target satellite fraction"      )
+    @click.option("--sigma"    , type = float, default = 0.0              , help = "Central count transition width" )
+    @click.option("--alpha"    , type = float, default = 1.0              , help = "Satellite count function slope" )
+    @click.option("--powerspec", type = str  , default = "eisenstein98_zb", help = "Power spectrum model to use"    ) 
+    @click.option("--massfunc" , type = str  , default = "tinker08"       , help = "Halo mass-function model to use")
+    def _cli(
+            simname  : str, 
+            redshift : float,
+            galdens  : float,
+            satfrac  : float,
+            sigma    : float = 0.0, 
+            alpha    : float = 1.0, 
+            powerspec: str   = "eisenstein98_zb", 
+            massfunc : str   = "tinker08",      
+        ) -> None:
+        r"""
+        Optimize the halo model parameters to get required galaxy density and satellite fraction. Copy paste 
+        these values (printed to ``stdout``) to the parameter file for galaxy generator code to use this 
+        model. 
+        """
+
+        assert simname , "'simname'  is required"
+        assert redshift, "'redshift' is required"
+        assert galdens , "'galdens'  is required"
+        assert satfrac , "'satfrac'  is required"
+
+        halomodel = optimizeHaloModel(
+            halomodel = buildFromAbacusSimulation(
+                simname       = simname, 
+                redshift      = redshift, 
+                sigmaM        = sigma, 
+                alpha         = alpha, 
+                powerspectrum = powerspec,
+                massfunction  = massfunc,
+            ),
+            galaxy_density     = galdens, 
+            satellite_fraction = satfrac, 
+        )
+
+        print(
+            '\n'.join([
+                "\n# --\n# Optimum HOD parameters: **copy-paste these values to the parameters file** \n# --\n",
+                f"Mmin:   {halomodel.Mmin:.6e}", 
+                f"M1:     {halomodel.M1  :.6e}", 
+                f"M0:     {halomodel.M0  :.6e}", 
+                f"sigmaM: {halomodel.sigmaM  }",
+                f"alpha:  {halomodel.alpha   }",
+            ])
+        )
+        return
+
+    _cli()
