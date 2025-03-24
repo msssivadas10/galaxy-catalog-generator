@@ -10,7 +10,7 @@ from scipy.optimize import minimize
 from astropy.cosmology import w0waCDM
 from galaxy_catalog_generator.halomodel import HaloModel
 
-# Look-up table to get `sigma_8`values used in the abacus summit cosmologies. This data is not in the
+# Look-up table to get `sigma_8` values used in the abacus summit cosmologies. This data is not in the
 # catalog headers, so it is taken from <https://abacussummit.readthedocs.io/en/latest/cosmologies.html>.
 _AbacusCosmologySigma8Table = {
     "000": 0.807952, "001": 0.776779, "002": 0.808189, "003": 0.855190, "004": 0.749999, "009": 0.811362, 
