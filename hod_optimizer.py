@@ -255,9 +255,35 @@ def optimizeHaloModel(
     logger.debug(f"Satellite fraction: {halomodel.averageSatelliteFraction():.3g}") 
     return halomodel
 
+
 if __name__ == "__main__":
 
     import click
+
+    # Format of the output printed to stdout:
+    _outputString = (
+        "# -- Used input model parameters --\n"
+        "# H0           : {H0:.8g}          \n"
+        "# Tcmb0        : {Tcmb0:.8g}       \n"
+        "# Om0          : {Om0:.8g}         \n"
+        "# Ob0          : {Ob0:.8g}         \n"
+        "# Ode0         : {Ode0:.8g}        \n"
+        "# w0           : {w0:.8g}          \n"
+        "# wa           : {wa:.8g}          \n"
+        "# ns           : {ns:.8g}          \n"
+        "# sigma8       : {sigma8:.8g}      \n"
+        "# Delta        : {Delta:d}         \n"
+        "# redshift     : {redshift:.8g}    \n"
+        "# powerspectrum: {powerspectrum:s} \n" 
+        "# massfunction : {massfunction:s}  \n"
+        "# \n"
+        "# -- Optimum HOD parameters: **copy-paste these values to the parameters file** -- \n"
+        "Mmin  : {Mmin:.8g}   \n"  
+        "M1    : {M1:.8g}     \n"
+        "M0    : {M0:.8g}     \n"
+        "sigmaM: {sigmaM:.8g} \n"
+        "alpha : {alpha:.8g}  \n"
+    )
 
     @click.command
     @click.version_option(__version__, message = "HOD Optimizer %(version)s") # Add --version
@@ -303,16 +329,31 @@ if __name__ == "__main__":
             satellite_fraction = satfrac, 
         )
 
+        # Write the parameter values to the stdout in a YML compatible format. All values except the HOD 
+        # parameters are commented (this is for informative purpose only!) 
         print(
-            '\n'.join([
-                "\n# --\n# Optimum HOD parameters: **copy-paste these values to the parameters file** \n# --\n",
-                f"Mmin:   {halomodel.Mmin:.6e}", 
-                f"M1:     {halomodel.M1  :.6e}", 
-                f"M0:     {halomodel.M0  :.6e}", 
-                f"sigmaM: {halomodel.sigmaM  }",
-                f"alpha:  {halomodel.alpha   }",
-            ])
+            _outputString.format(
+                Mmin          = halomodel.Mmin,
+                M1            = halomodel.M1,
+                M0            = halomodel.M0,
+                sigmaM        = halomodel.sigmaM,
+                alpha         = halomodel.alpha,
+                H0            = halomodel.psmodel.cosmo.H0.value,
+                Tcmb0         = halomodel.psmodel.cosmo.Tcmb0.value,
+                Om0           = halomodel.psmodel.cosmo.Om0,
+                Ob0           = halomodel.psmodel.cosmo.Ob0,
+                Ode0          = halomodel.psmodel.cosmo.Ode0,
+                w0            = halomodel.psmodel.cosmo.w0,
+                wa            = halomodel.psmodel.cosmo.wa,
+                ns            = halomodel.psmodel.ns,
+                sigma8        = halomodel.psmodel.sigma8,
+                Delta         = halomodel.Delta,
+                redshift      = redshift,
+                powerspectrum = powerspec,
+                massfunction  = massfunc,
+            )
         )
+
         return
 
     _cli()
