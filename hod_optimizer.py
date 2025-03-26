@@ -5,7 +5,7 @@
 __version__ = "0.1a"
 
 import logging
-import numpy as np
+import numpy as np, numpy.typing
 from scipy.optimize import minimize
 from astropy.cosmology import w0waCDM
 from galaxy_catalog_generator.halomodel import HaloModel
@@ -166,8 +166,8 @@ def optimizeHaloModel(
         satellite_fraction: float,
         Mmin_range        : tuple[float, float] = ( 1e+12, 1e+14 ),
         M1_range          : tuple[float, float] = ( 1e+13, 1e+15 ),
-        gridsize          : int = 12, 
-    ) -> HaloModel:
+        gridsize          : int  = 12, 
+    ) -> tuple[HaloModel, dict[str, numpy.typing.NDArray[np.float64]]]:
     r"""
     Optimize the HOD parameters ``Mmin`` and ``M1`` to match the calculated values of galaxy density and 
     satellite fraction with their required values.
@@ -196,6 +196,9 @@ def optimizeHaloModel(
     -------
     halomodel : HaloModel
         Fully initialised halo model object with optimized HOD parameters. ``M0`` is same as ``Mmin``.
+
+    datadict : dict
+        A dict containing the values of score 
 
     """
 
@@ -249,11 +252,23 @@ def optimizeHaloModel(
         galaxy_density, 
         satellite_fraction, 
     )
+    galaxyDensity     = halomodel.averageGalaxyDensity()
+    satelliteFraction = halomodel.averageSatelliteFraction()
     logger.debug(f"optimum values: Mmin={halomodel.Mmin:.3e} Msun, M1={halomodel.M1:.3e} Msun")
     logger.debug(f"Final score: {score:.4g}")
-    logger.debug(f"Galaxy density: {halomodel.averageGalaxyDensity():.3e} Mpc^-3")
-    logger.debug(f"Satellite fraction: {halomodel.averageSatelliteFraction():.3g}") 
-    return halomodel
+    logger.debug(f"Galaxy density: {galaxyDensity:.3e} Mpc^-3")
+    logger.debug(f"Satellite fraction: {satelliteFraction:.3g}") 
+
+    datadict = {
+        "galaxyDensity"    : galaxyDensity,
+        "satelliteFraction": satelliteFraction,
+        "scoreFunction"    : score,
+        "scoreGrid"        : scoreGrid,
+        "Mmin_Range"       : Mmin_range,
+        "M1_Range"         : M1_range,
+        "gridsize"         : gridsize,
+    }
+    return halomodel, datadict
 
 
 if __name__ == "__main__":
@@ -311,12 +326,12 @@ if __name__ == "__main__":
         model. 
         """
 
-        assert simname , "'simname'  is required"
+        assert  simname , "'simname'  is required"
         assert redshift, "'redshift' is required"
         assert galdens , "'galdens'  is required"
         assert satfrac , "'satfrac'  is required"
 
-        halomodel = optimizeHaloModel(
+        halomodel, tree = optimizeHaloModel(
             halomodel = buildFromAbacusSimulation(
                 simname       = simname, 
                 redshift      = redshift, 
@@ -329,30 +344,37 @@ if __name__ == "__main__":
             satellite_fraction = satfrac, 
         )
 
+        params = {
+            "Mmin"         : halomodel.Mmin,
+            "M1"           : halomodel.M1,
+            "M0"           : halomodel.M0,
+            "sigmaM"       : halomodel.sigmaM,
+            "alpha"        : halomodel.alpha,
+            "H0"           : halomodel.psmodel.cosmo.H0.value,
+            "Tcmb0"        : halomodel.psmodel.cosmo.Tcmb0.value,
+            "Om0"          : halomodel.psmodel.cosmo.Om0,
+            "Ob0"          : halomodel.psmodel.cosmo.Ob0,
+            "Ode0"         : halomodel.psmodel.cosmo.Ode0,
+            "w0"           : halomodel.psmodel.cosmo.w0,
+            "wa"           : halomodel.psmodel.cosmo.wa,
+            "ns"           : halomodel.psmodel.ns,
+            "sigma8"       : halomodel.psmodel.sigma8,
+            "Delta"        : halomodel.Delta,
+            "redshift"     : redshift,
+            "powerspectrum": powerspec,
+            "massfunction" : massfunc,
+        }
+        tree["optParameters"] = params
+
+        # Save the data tree for later use
+        import asdf
+        af = asdf.AsdfFile(tree)
+        af.write_to("hod_optimizer_result.asdf")
+        af.close()
+
         # Write the parameter values to the stdout in a YML compatible format. All values except the HOD 
         # parameters are commented (this is for informative purpose only!) 
-        print(
-            _outputString.format(
-                Mmin          = halomodel.Mmin,
-                M1            = halomodel.M1,
-                M0            = halomodel.M0,
-                sigmaM        = halomodel.sigmaM,
-                alpha         = halomodel.alpha,
-                H0            = halomodel.psmodel.cosmo.H0.value,
-                Tcmb0         = halomodel.psmodel.cosmo.Tcmb0.value,
-                Om0           = halomodel.psmodel.cosmo.Om0,
-                Ob0           = halomodel.psmodel.cosmo.Ob0,
-                Ode0          = halomodel.psmodel.cosmo.Ode0,
-                w0            = halomodel.psmodel.cosmo.w0,
-                wa            = halomodel.psmodel.cosmo.wa,
-                ns            = halomodel.psmodel.ns,
-                sigma8        = halomodel.psmodel.sigma8,
-                Delta         = halomodel.Delta,
-                redshift      = redshift,
-                powerspectrum = powerspec,
-                massfunction  = massfunc,
-            )
-        )
+        print( _outputString.format( **params ) )
 
         return
 
