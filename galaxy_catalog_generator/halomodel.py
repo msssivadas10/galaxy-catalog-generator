@@ -485,14 +485,21 @@ class HaloModel:
             dist * np.sin(theta) * np.sin(phi),
             dist * np.cos(theta) 
         ]).T
+        if posH is not None:
+            satellitePositions = posH + satellitePositions
 
         # Assigning random mass values to the satellite galaxies: These masses are drown from a bounded 
         # pareto distribution, with bounds [Mmin, scaleSHMF*massH] and slope given by slopeSHMF. 
         # NOTE: using inverse transform sampling <https://en.wikipedia.org/wiki/Pareto_distribution>
-        Ha, La     = self.scaleSHMF**self.slopeSHMF, (self.Mmin / massH)**self.slopeSHMF
-        massValues = massH * ( 
-            -( self.rng.uniform(size = Ns) * ( Ha - La ) - Ha ) / ( Ha * La )
-         )**( -1. / self.slopeSHMF )
+        if self.scaleSHMF <= self.Mmin / massH:
+            # In this case, the mass range is non existent, meaning that there are no satellites.
+            satellitePositions = np.empty(shape = (0, 3), dtype = satellitePositions.dtype)
+            massValues         = []
+        else:
+            Ha, La     = self.scaleSHMF**self.slopeSHMF, (self.Mmin / massH)**self.slopeSHMF
+            massValues = massH * ( 
+                -( self.rng.uniform(size = Ns) * ( Ha - La ) - Ha ) / ( Ha * La )
+            )**( -1. / self.slopeSHMF )
 
         # Another choise for the mass distribution will be a subhalo mass-function having the Schechter  
         # form (see <http://arxiv.org/abs/astro-ph/0402500v2>, Eqn 1). This requires rejection sampling 
@@ -508,7 +515,7 @@ class HaloModel:
         # If halo position is also given, then add a central galaxy with same mass as the halo: this 
         # will be the first item in the list...
         if posH is not None:
-            satellitePositions = np.vstack([ posH , posH + satellitePositions ])
+            satellitePositions = np.vstack([ posH , satellitePositions ])
             massValues         = np.hstack([ massH, massValues ])
 
         return np.concatenate(
