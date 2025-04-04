@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from numpy.random import default_rng, Generator
 from numpy.typing import NDArray
@@ -435,6 +436,8 @@ class HaloModel:
         
         """
 
+        logger = logging.getLogger()
+
         lnm   = np.asarray(lnm, dtype = np.float64)#.flatten()
         z     = self.redshift
         rho_m = self.mfmodel.rho_m * (1 + z)**3 # Matter density at redshift z
@@ -455,6 +458,7 @@ class HaloModel:
             lam  = self.satelliteCount(lnm), 
             size = np.shape(lnm),
         )
+        logger.debug(f"using central galaxy count={centralN} and satellite count={satelliteN}")
 
         haloMass   = np.exp(lnm)
         haloRadius = np.cbrt( 0.75 / np.pi * ( haloMass / rho_h ) ) # halo lagrangian radius in Mpc
@@ -468,8 +472,9 @@ class HaloModel:
                 return np.concatenate(
                         [ [posH], [[massH]] ], # mass in Msun along last column
                         axis = 1, 
-                    ) 
-            return None
+                    )
+            logger.debug(f"no satellites for halo mass={haloMass:.3e} Msun") 
+            return np.empty(shape = (0, 4), dtype = np.float64)
         
         # Generating random values corresponding to the distance of the galaxy from the halo center.
         # This follows a distribution matching the NFW profile of the halo density. Sampling is done
@@ -493,6 +498,7 @@ class HaloModel:
         # NOTE: using inverse transform sampling <https://en.wikipedia.org/wiki/Pareto_distribution>
         if self.scaleSHMF <= self.Mmin / massH:
             # In this case, the mass range is non existent, meaning that there are no satellites.
+            logger.debug(f"ignoring satellites - minimum mass fraction {self.Mmin / massH:.3g} >= {self.scaleSHMF:.3g}")
             satellitePositions = np.empty(shape = (0, 3), dtype = satellitePositions.dtype)
             massValues         = []
         else:
@@ -518,10 +524,12 @@ class HaloModel:
             satellitePositions = np.vstack([ posH , satellitePositions ])
             massValues         = np.hstack([ massH, massValues ])
 
-        return np.concatenate(
-                [ satellitePositions, massValues[:,None] ], # mass in Msun along last column
-                axis = 1, 
-            ) 
+        galaxyData = np.concatenate(
+            [ satellitePositions, massValues[:,None] ], # mass in Msun along last column
+            axis = 1, 
+        )
+        logger.debug(f"galaxy generation complete: {galaxyData.shape[0]} galaxies generated!") 
+        return galaxyData 
     
     ########################################################################################################
     #                                   AVERAGE DENSITY CALCULATION                                        #
@@ -635,7 +643,7 @@ class HaloModel:
             return galaxyCount * self.haloMassFunction(lnm, return_value = "dndlnm")
 
         retval, abserr = quad( integrand, a = a, b = b )
-        return retval / self.averageHaloDensity(lnma, lnmb)
+        return retval / self.averageGalaxyDensity(lnma, lnmb)
     
 
 
