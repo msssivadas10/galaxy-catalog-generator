@@ -156,7 +156,7 @@ def generateGalaxyCatalog(
 
     # List all catalog files in the given path:
     files = _listCatalogs(catpath)
-    logger.info(f"listed {len(files)} with path pattern {catpath!r}")
+    logger.info(f"listed {len(files)} files with path pattern {catpath!r}")
     if not files: return
 
     # Read the first catalog file and load the header data. This is used for initialising cosmology 
@@ -227,9 +227,10 @@ def generateGalaxyCatalog(
         for hid, posH, massH in zip(haloID, haloPosition, haloMass):
             halosPerFile += 1
             galaxyData    = haloModel.generateSatellitePositions( np.log(massH), posH )
-            if galaxyData is None:
+            if galaxyData.shape[0] < 1:
                 continue
 
+            # print( massH, galaxyData.shape )
             cgalaxyPerFile += 1
             sgalaxyPerFile += galaxyData.shape[0]-1
             parentHaloID.append( np.repeat(hid, repeats = galaxyData.shape[0]) )
@@ -285,6 +286,9 @@ def generateGalaxyCatalog(
 if __name__ == "__main__":
 
     import click, yaml, inspect, logging.config
+
+    import warnings
+    warnings.filterwarnings(action = "ignore")
 
     @click.command
     @click.version_option(__version__, message = "Abacus Count %(version)s") # Add --version
