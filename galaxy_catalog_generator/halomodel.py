@@ -500,7 +500,7 @@ class HaloModel:
             # In this case, the mass range is non existent, meaning that there are no satellites.
             logger.debug(f"ignoring satellites - minimum mass fraction {self.Mmin / massH:.3g} >= {self.scaleSHMF:.3g}")
             satellitePositions = np.empty(shape = (0, 3), dtype = satellitePositions.dtype)
-            massValues         = []
+            massValues         = np.array([])
         else:
             Ha, La     = self.scaleSHMF**self.slopeSHMF, (self.Mmin / massH)**self.slopeSHMF
             massValues = massH * ( 
@@ -560,7 +560,7 @@ class HaloModel:
         """
 
         # Integration limits: lower limit is calculated 4 sigma units below the minimum mass.
-        a = lnma or np.log( self.Mmin - 4*self.sigmaM )
+        a = lnma or np.log( self.Mmin ) - 4*self.sigmaM
         b = lnmb
         assert a < b, "lower limit must be less than upper limit"
 
@@ -597,7 +597,7 @@ class HaloModel:
         """
 
         # Integration limits: lower limit is calculated 4 sigma units below the minimum mass.
-        a = lnma or np.log( self.Mmin - 4*self.sigmaM )
+        a = lnma or np.log( self.Mmin ) - 4*self.sigmaM
         b = lnmb
         assert a < b, "lower limit must be less than upper limit"
 
@@ -634,7 +634,7 @@ class HaloModel:
         """
 
         # Integration limits: lower limit is calculated 4 sigma units below the minimum mass.
-        a = lnma or np.log( self.Mmin - 4*self.sigmaM )
+        a = lnma or np.log( self.Mmin ) - 4*self.sigmaM
         b = lnmb
         assert a < b, "lower limit must be less than upper limit"
 
