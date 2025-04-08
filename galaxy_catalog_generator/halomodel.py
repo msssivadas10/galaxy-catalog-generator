@@ -185,6 +185,15 @@ class HaloModel:
     @property 
     def growthFactor(self) -> float: 
         return self.psmodel.dplus_z / self.psmodel.dplus_0
+    
+    def setRedshift(self, z: float) -> None:
+        r"""
+        Set the value of redshift.
+        """
+        # Set the redshift value to mass-function model: this will also set the redshift
+        # of the power spectrum model. 
+        self.mfmodel.setRedshift(z)
+        return object.__setattr__(self, "redshift", z)
 
     def createConcMassInterpolationTable(
             self, 
@@ -210,6 +219,7 @@ class HaloModel:
         return object.__setattr__( self, "_cmtable", cmtable )
     
     def __post_init__(self) -> None:
+        self.setRedshift( self.redshift )
         self.createConcMassInterpolationTable()
         return
     

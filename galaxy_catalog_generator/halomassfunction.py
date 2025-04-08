@@ -54,6 +54,14 @@ class HaloMassFunction( ABC ):
         )
         return np.array(rho_m)
 
+    def setRedshift(self, z: float) -> None:
+        r"""
+        Set the value of redshift.
+        """
+        self.psmodel.setRedshift(z) # set redshift power spectrum model
+        object.__setattr__(self, "redshift", z)
+        return self.createInterpolationTable() # recalculate tables
+
     @abstractmethod
     def fsigma(
             self, 

@@ -142,10 +142,16 @@ class PowerSpectrum( ABC ):
     dplus_0 : float = field(default = np.nan, init = False, compare = False, repr = False) 
 
     def __post_init__(self) -> None:
-        object.__setattr__( self, 'dplus_0', linearGrowth(z = 0.           , cosmo = self.cosmo) )
-        object.__setattr__( self, 'dplus_z', linearGrowth(z = self.redshift, cosmo = self.cosmo) )
         self.normalize()
         return
+    
+    def setRedshift(self, z: float) -> None:
+        r"""
+        Set the value of redshift.
+        """
+        object.__setattr__( self, 'dplus_0', linearGrowth(z = 0., cosmo = self.cosmo) )
+        object.__setattr__( self, 'dplus_z', linearGrowth(z = z , cosmo = self.cosmo) )
+        return object.__setattr__(self, "redshift", z)
     
     @abstractmethod
     def transfer(
@@ -293,7 +299,7 @@ class PowerSpectrum( ABC ):
         # Save the current redshift and reset to present redshift (0), since the normalization
         # is calculated for present redshift... 
         redshift = self.redshift
-        object.__setattr__(self, "redshift", 0.0)
+        self.setRedshift(0.0)
 
         norm = 1. / self.spectralMoment(
             lnr        = np.log(8.) - np.log(self.cosmo.h), 
@@ -301,7 +307,7 @@ class PowerSpectrum( ABC ):
             j          = 0, 
             normalize  = False, 
         )
-        object.__setattr__(self, "redshift", redshift) # reset redshift value
+        self.setRedshift(redshift) # reset redshift value
         return object.__setattr__( self, "norm", norm )
         
 ############################################################################################################
