@@ -164,7 +164,7 @@ def optimizeHaloModel(
         halomodel         : HaloModel,
         galaxy_density    : float, 
         satellite_fraction: float,
-        Mmin_range        : tuple[float, float] = ( 1e+12, 1e+14 ),
+        Mmin_range        : tuple[float, float] = ( 1e+11, 1e+14 ),
         M1_range          : tuple[float, float] = ( 1e+13, 1e+15 ),
         gridsize          : int  = 12, 
     ) -> tuple[HaloModel, dict[str, numpy.typing.NDArray[np.float64]]]:
