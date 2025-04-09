@@ -146,9 +146,7 @@ def scoreFunction(
 
     # Set the HOD paramters t the model
     Mmin, M1 = np.exp(x)
-    object.__setattr__(halomodel, "Mmin", Mmin)
-    object.__setattr__(halomodel, "M1"  , M1  )
-    object.__setattr__(halomodel, "M0"  , Mmin)
+    halomodel._updateHaloParameters(Mmin = Mmin, M1 = M1, M0 = Mmin)
 
     # Relative diffrence in galaxy density
     deltaG = ( halomodel.averageGalaxyDensity( lnmb = np.log(1e+18) ) / galaxy_density - 1. )**2

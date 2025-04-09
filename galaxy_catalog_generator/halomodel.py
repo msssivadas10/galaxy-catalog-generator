@@ -186,14 +186,34 @@ class HaloModel:
     def growthFactor(self) -> float: 
         return self.psmodel.dplus_z / self.psmodel.dplus_0
     
-    def setRedshift(self, z: float) -> None:
+    def setRedshift(
+            self, 
+            z: float, 
+        ) -> None:
         r"""
-        Set the value of redshift.
+        Set the value of redshift. Value should be greater than -1.
+
         """
         # Set the redshift value to mass-function model: this will also set the redshift
         # of the power spectrum model. 
         self.mfmodel.setRedshift(z)
         return object.__setattr__(self, "redshift", z)
+    
+    def _updateHaloParameters(
+            self, 
+            **kwargs: float, 
+        ) -> None:
+        r"""
+        Set new values for halo model parameters. Only values for the parameters ``Mmin``, ``sigmaM``, 
+        ``M0``, ``M1``, ``alpha``, ``scaleSHMF`` and ``slopeSHMF`` can be updated.
+
+        """
+        updatableFields = ( "Mmin", "sigmaM", "M0", "M1", "alpha", "scaleSHMF", "slopeSHMF" )
+        for __field, __value in kwargs.items():
+            if __field not in updatableFields:
+                raise AttributeError(f"cannot update value for attribute {__field!r}")
+            object.__setattr__(self, __field, __value)
+        return
 
     def createConcMassInterpolationTable(
             self, 
