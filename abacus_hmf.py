@@ -1,6 +1,44 @@
+__version__ = "0.1a"
 
+
+import logging, logging.config
+import os, os.path, glob, re, asdf, click
 import numpy as np
-import click, yaml, inspect, logging.config
+from numpy.typing import NDArray
+from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog
+
+def _listCatalogs(path: str, /) -> list[str]:
+    r"""
+    List all the files matching to the given path or glob pattern.
+    """
+    
+    globResult  = glob.glob(path)
+    filePattern = re.compile(r"halo_info_(\d+).asdf") # for files like `halo_info_123.asdf`
+    files       = [
+        file for file, _ in sorted(
+            # Filter out only the files with names matchng the pattern and sorting based on the
+            # integer index: 
+            filter(
+                lambda a: a[1], 
+                [ ( file, filePattern.match(os.path.basename(file)) ) for file in globResult ]
+            ), 
+            key  = lambda a: int( a[1].group(1) ), 
+        )
+    ]
+    return files
+
+def _loadHaloMass(fn: str, /) -> NDArray[np.float64]:
+    r"""
+    Load an abacus summit halo catalog file and return the halo mass (Msun).
+    """
+    
+    catalog  = CompaSOHaloCatalog(fn, cleaned = False, fields = ["N"])
+    
+    # Halo mass in Msun
+    unitMass = catalog.header["ParticleMassMsun"]
+    haloMass = np.array( catalog.halos["N"] ) * unitMass
+
+    return haloMass
 
 @click.command
 @click.argument('path' , type = click.Path(exists = False))
@@ -70,7 +108,6 @@ def hmf(
     logger.info(f"loading header data from file: {files[0]!r}...")
     with asdf.open(files[0]) as af:
         unitMass = af["header"]["ParticleMassMsun"] 
-        hubble   = 0.01 * af["header"]["H0"]
         boxsize  = af["header"]["BoxSizeMpc"]
 
     # Estimating halo mass-function
@@ -79,7 +116,7 @@ def hmf(
     dndM         = np.zeros(dlnMassH.shape)
     for file in files:
         logger.info(f"loading halo catalog from file: {file!r}")
-        _, _, haloMass = _loadCatalog(file) # halo mass in Msun 
+        haloMass  = _loadHaloMass(file) # halo mass in Msun 
         dndM[:]  += np.histogram(haloMass, bins = massBinEdges)[0][:]
     dndM  /= ( boxsize**3 * dlnMassH )
     massH = np.sqrt( massBinEdges[1:] * massBinEdges[:-1] )
@@ -94,3 +131,6 @@ def hmf(
         comments  = '#'
     )
     return
+
+if __name__ == "__main__":
+    hmf()
