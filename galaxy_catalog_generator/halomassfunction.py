@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.typing import NDArray
 from scipy.interpolate import CubicSpline
 from typing import TypeVar, ClassVar, Literal, Any
 from dataclasses import dataclass, field
@@ -35,7 +36,7 @@ class HaloMassFunction( ABC ):
         assert isinstance(self.psmodel, PowerSpectrum)
         if not np.allclose(self.psmodel.redshift, self.redshift):
             raise ValueError( f"redshift mismatch: {self.psmodel.redshift} and {self.redshift}" )
-
+        
         self.createInterpolationTable()
         return
 
@@ -224,6 +225,94 @@ class HaloMassFunction( ABC ):
         return retval
 
 ############################################################################################################
+#                                   LOAD FROM HALO MASS-FUNCTION TABLE                                     #
+############################################################################################################
+ 
+@dataclass(init = False, frozen = True, repr = False)
+class MassFunctionData(HaloMassFunction):
+    r"""
+    Halo mass-function loaded from pre-calculated data. This can be given as an array or the path to the 
+    text file containing the data (see ``data`` parameter). 
+
+    Parameters
+    ----------
+    data : str, ndarray of shape (N, 2)
+        Mass-function table as an array or path to the file containing the table. This should have two 
+        columns - natural log of halo mass (Msun) and natural log of mass-function dn/dm (Mpc^-3).  
+    
+    psmodel : PowerSpectrum
+        Matter power spectrum object. This is used for accessing the cosmology model as well as calculating
+        the denisty variance values. It should be configured to the same redshift.
+        
+    redshift : float
+        Redshift at which the mass-function is evaluated. This value must be greater than -1.
+
+    Delta : float, default=200
+        Halo over-density w.r.to the mean matter density. 
+
+    **loaderargs : optional
+        Other keyword arguments are passed to ``numpy.loadtxt`` for loading the data from file.
+
+    """
+    data: CubicSpline
+
+    def __init__(
+            self, 
+            data    : str | NDArray[np.float64], 
+            psmodel : PowerSpectrum,
+            redshift: float,
+            Delta   : int = 200,
+            **loaderargs,
+        ) -> None:
+
+        if isinstance(data, str):
+            loaderargs = { "unpack": True, "delimiter": ',', "comments": '#' } | loaderargs
+            loaderargs["unpack"] = True
+            
+            # ``data`` is the path to the file storing the mass-function data. This file should contain the
+            # natural log of halo mass (Msun) and natural log of mass-function dn/dm (Mpc^-3) as the only 
+            # two columns.   
+            lnM, lndndM = np.loadtxt(data, **loaderargs)
+        else:
+            # ``data`` is an array of values in the same format as loaded from the file...
+            lnM, lndndM = np.transpose(data)
+
+        object.__setattr__(self, "data", CubicSpline(lnM, lndndM))
+
+        return super().__init__(psmodel = psmodel, redshift = redshift, Delta = Delta)
+    
+    def massFunction(
+            self, 
+            lnm: _T, 
+            return_value: Literal["dndlogm", "dndlnm", "dndm", "fs"] = "dndlogm", 
+        ) -> _T:
+        # It is easier to directly calculate the mass-functions dn/dm or dn/dlnm than using f(s), which 
+        # needed to be calculated from these values 
+
+        retval = np.exp( self.data(lnm) )
+
+        if return_value == "fs":
+            # Calculate ``f(s)``, given mass and dn/dm.
+            s, dlnsdlnm = self.sigma(lnm, return_derivative = True)
+            retval      = retval * np.exp(2*lnm) / np.abs(dlnsdlnm) / self.rho_m
+            return retval
+        
+        elif return_value != "dndm":
+            retval = np.exp(lnm) * retval
+            if return_value == "dndlnm" : return retval
+            if return_value == "dndlogm": return retval * 2.3025850929940455 
+
+        return retval
+    
+    def fsigma(
+            self, 
+            s: _T, 
+        ) -> _T:
+        # Calculating mass from given varience values, by finding roots of the spline:
+        lnm  = self._sigtable.solve(s)
+        return self.massFunction(lnm, return_value = "fs") 
+
+############################################################################################################
 #                                   SOME HALO MASS-FUNCTION MODELS!...                                     #
 ############################################################################################################
 
@@ -235,6 +324,10 @@ class MassFuncTinker08(HaloMassFunction):
 
     Parameters
     ----------
+    psmodel : PowerSpectrum
+        Matter power spectrum object. This is used for accessing the cosmology model as well as calculating
+        the denisty variance values. It should be configured to the same redshift.
+
     redshift : float
         Redshift at which the mass-function is evaluated. This value must be greater than -1.
 

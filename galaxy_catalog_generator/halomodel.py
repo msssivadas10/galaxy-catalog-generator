@@ -9,7 +9,7 @@ from typing import TypeVar, Literal
 from dataclasses import dataclass, field
 from astropy.cosmology import FLRW
 from .powerspectrum import PowerSpectrum, availableModels as powerspectrum_models
-from .halomassfunction import HaloMassFunction, availableModels as massfunction_models
+from .halomassfunction import HaloMassFunction, MassFunctionData, availableModels as massfunction_models
 
 _T = TypeVar('_T')
 
@@ -79,21 +79,22 @@ class HaloModel:
     @classmethod
     def create(
             cls,
-            Mmin     : float,
-            sigmaM   : float,
-            M0       : float,
-            M1       : float,
-            alpha    : float,
-            scaleSHMF: float,
-            slopeSHMF: float,
-            redshift : float, 
-            cosmo    : FLRW, 
-            psmodel  : type[PowerSpectrum] | str    = "eisenstein98_zb", 
-            mfmodel  : type[HaloMassFunction] | str = "tinker08",
-            ns       : float = 1., 
-            sigma8   : float = 1.,
-            Delta    : int   = 200,
-            seed     : int   = None, 
+            Mmin         : float,
+            sigmaM       : float,
+            M0           : float,
+            M1           : float,
+            alpha        : float,
+            scaleSHMF    : float,
+            slopeSHMF    : float,
+            redshift     : float, 
+            cosmo        : FLRW, 
+            psmodel      : type[PowerSpectrum] | str    = "eisenstein98_zb", 
+            mfmodel      : type[HaloMassFunction] | str = "tinker08",
+            ns           : float = 1., 
+            sigma8       : float = 1.,
+            Delta        : int   = 200,
+            seed         : int   = None,
+            mf_loaderargs: dict  = {}, 
         ):
         r"""
         Create a halo model object.
@@ -133,7 +134,8 @@ class HaloModel:
             Power spectrum model to use.
 
         mfmodel : subclass of ``HaloMassFunction``, str, default='tinker08'
-            Halo mass-function model to use.
+            Halo mass-function model to use. It can be the name of a pre-defined model or the path to the 
+            file containing the values in plain text format 
 
         ns : float, default=1
             Index of the initial power spectrum. This is assumed to be a power law function :math:`Ak^n_s`.
@@ -148,17 +150,36 @@ class HaloModel:
         seed : int, optional 
             Seed value for the random number generator used.
 
+        mf_loaderargs : dict
+            Keyword arguments passed to ``numpy.loadtxt`` for loading the mass-function data from file.
+
         """
         
         assert psmodel in powerspectrum_models, f"unknown power spectrum model: {psmodel}"
-        assert mfmodel in massfunction_models , f"unknown mass-function model: {mfmodel}"
-
-        psmodel = powerspectrum_models.get(psmodel)(
+        powerspecObject = powerspectrum_models.get(psmodel)(
             cosmo, 
             redshift = redshift, 
             ns       = ns, 
             sigma8   = sigma8, 
         )
+        
+        if mfmodel in massfunction_models:
+            # Create a mass-function object of this pre-defined model:
+            massfuncObject = massfunction_models.get(mfmodel)(
+                psmodel  = powerspecObject, 
+                redshift = redshift, 
+                Delta    = Delta, 
+            )
+        else:
+            # This may be the filename containg the pre-calculated data or data...
+            massfuncObject = MassFunctionData(
+                mfmodel, 
+                psmodel  = powerspecObject, 
+                redshift = redshift, 
+                Delta    = Delta, 
+                **mf_loaderargs
+            )
+
         self = HaloModel(
             Mmin      = Mmin,
             sigmaM    = sigmaM,
@@ -168,14 +189,10 @@ class HaloModel:
             scaleSHMF = scaleSHMF, 
             slopeSHMF = slopeSHMF, 
             redshift  = redshift, 
-            psmodel   = psmodel, 
-            mfmodel   = massfunction_models.get(mfmodel)(
-                psmodel  = psmodel, 
-                redshift = redshift, 
-                Delta    = Delta, 
-            ), 
-            Delta    = Delta,
-            rng      = default_rng(seed)
+            psmodel   = powerspecObject, 
+            mfmodel   = massfuncObject, 
+            Delta     = Delta,
+            rng       = default_rng(seed)
         )
         return self
     
