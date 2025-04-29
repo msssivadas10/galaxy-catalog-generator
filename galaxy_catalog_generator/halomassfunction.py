@@ -255,6 +255,7 @@ class MassFunctionData(HaloMassFunction):
 
     """
     data: CubicSpline
+    file: str = ""
 
     def __init__(
             self, 
@@ -273,6 +274,7 @@ class MassFunctionData(HaloMassFunction):
             # natural log of halo mass (Msun) and natural log of mass-function dn/dm (Mpc^-3) as the only 
             # two columns.   
             lnM, lndndM = np.loadtxt(data, **loaderargs)
+            object.__setattr__(self, "file", data)
         else:
             # ``data`` is an array of values in the same format as loaded from the file...
             lnM, lndndM = np.transpose(data)
@@ -317,7 +319,7 @@ class MassFunctionData(HaloMassFunction):
 ############################################################################################################
 
 @dataclass(init = True, frozen = True, repr = False)
-class MassFuncTinker08(HaloMassFunction):
+class MassFunctionTinker08(HaloMassFunction):
     r"""
     Halo mass-function by Tinker et al (2008). This model is cosmology independent, but has redshift and 
     over-density dependence.
@@ -382,6 +384,6 @@ class MassFuncTinker08(HaloMassFunction):
         return f
     
 availableModels: dict[str, type[HaloMassFunction]] = {
-    "tinker08": MassFuncTinker08,
+    "tinker08": MassFunctionTinker08,
 }
 
