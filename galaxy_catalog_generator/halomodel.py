@@ -203,6 +203,9 @@ class HaloModel:
     def growthFactor(self) -> float: 
         return self.psmodel.dplus_z / self.psmodel.dplus_0
     
+    @property
+    def cosmo(self) -> FLRW: return self.psmodel.cosmo
+    
     def setRedshift(
             self, 
             z: float, 
