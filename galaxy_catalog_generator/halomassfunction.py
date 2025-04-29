@@ -32,6 +32,9 @@ class HaloMassFunction( ABC ):
 
     _sigtable: CubicSpline = field(default = None, init = False, repr = False)
 
+    # Model id is used to used to identify the model and used as key for the model dict
+    id: ClassVar[str] = ...  
+
     def __post_init__(self) -> None:
         assert isinstance(self.psmodel, PowerSpectrum)
         if not np.allclose(self.psmodel.redshift, self.redshift):
@@ -257,6 +260,11 @@ class MassFunctionData(HaloMassFunction):
     data: CubicSpline
     file: str = ""
 
+    # Here, the filename is the id (useful when data is loaded from file, but not very useful if the
+    # object is created by direcly using an array of values!)
+    @property 
+    def id(self) -> str: return self.file  
+
     def __init__(
             self, 
             data    : str | NDArray[np.float64], 
@@ -337,6 +345,8 @@ class MassFunctionTinker08(HaloMassFunction):
         Halo over-density w.r.to the mean matter density. 
 
     """
+
+    id: ClassVar[str] = "tinker08"
 
     # Internal parameters:
     A    : float = field(init = False, default = np.nan, repr = False)

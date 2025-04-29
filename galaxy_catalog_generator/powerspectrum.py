@@ -2,7 +2,7 @@
 import numpy as np
 from scipy.integrate import quad
 from functools import reduce
-from typing import TypeVar, Literal
+from typing import TypeVar, Literal, ClassVar
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from astropy.cosmology import FLRW
@@ -140,6 +140,9 @@ class PowerSpectrum( ABC ):
     norm    : float = field(default = 1.    , init = False, compare = False, repr = False) 
     dplus_z : float = field(default = np.nan, init = False, compare = False, repr = False) 
     dplus_0 : float = field(default = np.nan, init = False, compare = False, repr = False) 
+
+    # Model id is used to used to identify the model and used as key for the model dict
+    id: ClassVar[str] = ...  
 
     def __post_init__(self) -> None:
         self.normalize()
@@ -343,6 +346,8 @@ class EisensteinHu98_zb(PowerSpectrum):
     >>> ps = EisensteinHu98_zb(cm, redshift = 0., ns = 1., sigma8 = 1.)
 
     """
+
+    id: ClassVar[str] = "eisenstein98_zb"
 
     # Internal paremeters:
     h      : float = field(init = False, default = np.nan, repr = False)
