@@ -97,7 +97,7 @@ class HODOptimizer:
         # Set the HOD paramters to the model
         Mmin, M1  = np.exp(p)
         halomodel = self.halomodel
-        halomodel._updateHaloParameters(Mmin = Mmin, M1 = M1, M0 = Mmin)
+        halomodel._updateHaloParameters(Mmin = float(Mmin), M1 = float(M1), M0 = float(Mmin))
 
         # Relative diffrence in galaxy density
         galaxy_density = halomodel.averageGalaxyDensity( lnmb = np.log(1e+18) )
