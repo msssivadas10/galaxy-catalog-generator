@@ -1,8 +1,12 @@
+#!/usr/bin/python3
+# 
+# CLI tools to process abacus halo catalogs and generate data.
+# 
 
 __version__ = "0.1a"
 
 import os, os.path, glob, re, click, logging, numpy as np
-from typing import IO
+from typing import IO, Any
 from numpy.typing import NDArray
 from astropy.cosmology import w0waCDM
 from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog
@@ -35,6 +39,10 @@ AbacusCosmologySigma8Table = {
 ############################################################################################################
 
 def listCatalogs(simname: str, redshift: float, search_paths: list[str] = []) -> list[str]:
+    r"""
+    Search for abacus halo catalog files for given simulation name and redshift in the paths
+    specified and return a list of paths to the files.  
+    """
 
     logger = logging.getLogger()
 
@@ -66,6 +74,9 @@ def listCatalogs(simname: str, redshift: float, search_paths: list[str] = []) ->
     return files
 
 def loadCatalog(fn: str) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
+    r"""
+    Load data from a abacus halo catalog file. Halo ID, position in Mpc and mass in Msun are returned.
+    """
 
     logger = logging.getLogger()
     
@@ -86,6 +97,10 @@ def loadCatalog(fn: str) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArra
     return haloID, haloPosition, haloMass
 
 def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
+    r"""
+    Initialize a halo model object using the cosmology parameters corresponding to the given abacus 
+    simulation details and halo model parameters.
+    """
 
     logger = logging.getLogger()
 
@@ -94,57 +109,94 @@ def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
     logger.info(f"loading metatdata for simulation {simname!r}for redshift {redshift}...")
     tree = abacusnbody.metadata.get_meta(simname, redshift)
     
-    # CMB temperature value if fixed as 2.728 K
-    tree["Tcmb0" ] = 2.728
-    
-    # Sigma-8 parameter value
-    abacusCosmoID    = re.search(r"AbacusSummit_\w+_c(\d\d\d)_ph\d\d\d", tree["SimName"]).group(1) 
-    tree["sigma8"] = AbacusCosmologySigma8Table[abacusCosmoID]
-    
-    haloargs = {"Mmin"     : None, "sigmaM"   : 0,                 # Central galaxy count
-                "M1"       : None, "M0"       : None, "alpha": 1,  # Satellite galaxy count
-                "scaleSHMF": 0.5 , "slopeSHMF": 2.,                # Subhalo mass-function
-    } | haloargs
+    # Get the id of the cosmology model from simulation name
+    cid = re.search(r"AbacusSummit_\w+_c(\d\d\d)_ph\d\d\d", tree["SimName"]).group(1) 
 
     logger.info(f"creating halo model object...")
-    hm = HaloModel.create(
-        **haloargs, 
-        redshift = tree["Redshift"], 
-        cosmo    = w0waCDM(
-                       H0    = tree["H0"], 
-                       Om0   = tree["Omega_M"], 
-                       Ode0  = tree["Omega_DE"],
-                       Ob0   = tree["omega_b"] / ( 0.01*tree["H0"] )**2,
-                       w0    = tree["w0"], 
-                       wa    = tree["wa"], 
-                       Tcmb0 = tree["Tcmb0"],
-                       name  = tree["SimName"],
-
-                       # Even though the simulation metadata can be accessed by using the values of 
-                       # simulation name and redshift, certain values in the header are stored as metadata 
-                       # of the cosmology object, for easy access, without depending on ``abacusnbody.metadata``
-                       # module...  
-                       meta  = {
-                            "SimName"          : tree["SimName"], 
-                            "Redshift"         : tree["Redshift"],
-                            "SODensity"        : tree["SODensity"],
-                            "BoxSize"          : tree["BoxSize"],
-                            "BoxSizeMpc"       : tree["BoxSizeMpc"],
-                            "ParticleMassMsun" : tree["ParticleMassMsun"], 
-                            "ParticleMassHMsun": tree["ParticleMassHMsun"], 
-                       }
-                   ), 
-        ns       = tree["n_s"], 
-        sigma8   = tree["sigma8"], 
-        Delta    = tree["SODensity"][0],
+    cosmo = w0waCDM(
+        H0    = tree["H0"      ], 
+        Om0   = tree["Omega_M" ], 
+        Ode0  = tree["Omega_DE"],
+        Ob0   = tree["omega_b" ] / ( 0.01*tree["H0"] )**2,
+        w0    = tree["w0"      ], 
+        wa    = tree["wa"      ], 
+        Tcmb0 = 2.728, # CMB temperature value if fixed as 2.728 K
+        name  = tree["SimName" ],
     )
-    return hm
+    model = HaloModel.create(
+        Mmin      = haloargs.get( "Mmin"     , None ),
+        sigmaM    = haloargs.get( "sigmaM"   , 0.   ),
+        M1        = haloargs.get( "M1"       , None ),
+        M0        = haloargs.get( "M0"       , None ),
+        alpha     = haloargs.get( "alpha"    , 1.   ),
+        scaleSHMF = haloargs.get( "scaleSHMF", 0.5  ),
+        slopeSHMF = haloargs.get( "slopeSHMF", 2.   ),
+        redshift  = tree["Redshift"], 
+        cosmo     = w0waCDM(
+            H0    = tree["H0"      ], 
+            Om0   = tree["Omega_M" ], 
+            Ode0  = tree["Omega_DE"],
+            Ob0   = tree["omega_b" ] / ( 0.01*tree["H0"] )**2,
+            w0    = tree["w0"      ], 
+            wa    = tree["wa"      ], 
+            Tcmb0 = 2.728, # CMB temperature value if fixed as 2.728 K
+            name  = tree["SimName" ],
+        ), 
+        ns        = tree["n_s"], 
+        sigma8    = AbacusCosmologySigma8Table[cid], 
+        Delta     = tree["SODensity"][0],
+        meta      = {},
+    )
+
+    # Save a few other values from the simulation metadata. Only the values of ``simname`` and 
+    # ``redshift`` are enough, beacuse using them one can get the full metadata using the package
+    # ``abacusnbody.metadata``. 
+    keymapping = { "boxsize": "BoxSize", "particleMass": "ParticleMassHMsun" }
+    model.meta.update({ altkey: tree[key] for altkey, key in keymapping.items() })  
+    return model
+
+def halomodelDict(model: HaloModel, include_meta: bool = True) -> dict[str, Any]:
+    r"""
+    Convert a halo model object into a mapping, ready to be serialized as YAML/JSON. 
+    """
+
+    cosmo = model.cosmo
+    tree  = {
+        "Mmin"     : model.Mmin, 
+        "M0"       : model.M0, 
+        "M1"       : model.M1, 
+        "sigmaM"   : model.sigmaM, 
+        "alpha"    : model.alpha,
+        "scaleSHMF": model.scaleSHMF, 
+        "slopeSHMF": model.slopeSHMF, 
+        "Delta"    : model.Delta, 
+        "ns"       : model.psmodel.ns,
+        "sigma8"   : model.psmodel.sigma8,
+        "H0"       : np.array(cosmo.H0).tolist(), 
+        "Om0"      : cosmo.Om0, 
+        "Ode0"     : cosmo.Ode0, 
+        "Ob0"      : cosmo.Ob0, 
+        "w0"       : cosmo.w0, 
+        "wa"       : cosmo.wa, 
+        "Tcmb0"    : np.array(cosmo.Tcmb0).tolist(),
+        "simname"  : cosmo.name,
+        "redshift" : model.redshift,
+        "psmodel"  : model.psmodel.id,
+        "mfmodel"  : model.mfmodel.id
+    }
+    if include_meta: 
+        tree.update(model.meta)
+
+    return tree
 
 ############################################################################################################
 #                                       ARGUMENT VALIDATOR FUNCTIONS                                       #
 ############################################################################################################
 
-def siminfoValidator(ctx: click.Context, param: object, value: tuple[str, float]) -> tuple[str, float]:  
+def siminfoValidator(ctx: Any, param: Any, value: tuple[str, float]) -> tuple[str, float]:  
+    r"""
+    Check if the value is a tuple of valid abacus simulation name and redshift value.
+    """
 
     try:
         import abacusnbody.metadata
@@ -158,7 +210,10 @@ def siminfoValidator(ctx: click.Context, param: object, value: tuple[str, float]
     
     return value
 
-def massrangeValidator(ctx: click.Context, param: object, value: tuple[str, float]) -> tuple[str, float]:  
+def massrangeValidator(ctx: Any, param: Any, value: tuple[float, float]) -> tuple[float, float]:  
+    r"""
+    Check if the value is a valid mass range specifier.
+    """
       
     try:
         left, right = value
@@ -176,7 +231,52 @@ def massrangeValidator(ctx: click.Context, param: object, value: tuple[str, floa
 @click.group
 @click.version_option(__version__, message = "Abacus Halos %(version)s")
 def cli() -> None:
-    pass
+    r"""
+    Tools using abacus simulation halo catalogs to generate data.
+    """
+    
+    import logging.config, warnings
+    
+    warnings.catch_warnings(action="ignore")
+
+    # Configure the loggers
+    logPath = "logs"
+    logFile = os.path.join( logPath, f"{ os.path.basename(__file__).rsplit('.', 1)[0] }.log" )
+    os.makedirs( logPath, exist_ok = True )
+    logging.config.dictConfig({
+        "version": 1, 
+        "disable_existing_loggers": True, 
+        "formatters": {
+            "default": { "format": "[ %(asctime)s %(levelname)s %(process)d ] %(message)s" }
+        }, 
+        "handlers": {
+            "stream": {
+                "level": "INFO", 
+                "formatter": "default", 
+                "class": "logging.StreamHandler", 
+                "stream": "ext://sys.stdout"
+            }, 
+            "file": {
+                "level": "INFO", 
+                "formatter": "default", 
+                "class": "logging.handlers.RotatingFileHandler", 
+                "filename": logFile, 
+                "mode": "a", 
+                "maxBytes": 2097152, # create a new file if size exceeds 2 MiB
+                "backupCount": 4     # use maximum 4 files
+            }
+        }, 
+        "loggers": {
+            "root": {
+                "level": "INFO", 
+                "handlers": [
+                    "stream", 
+                    "file"
+                ]
+            }
+        }
+    })
+    return
 
 @cli.command
 @click.option("--siminfo", 
@@ -209,6 +309,12 @@ def massfunc(
         nbins       : int                 = 32, 
         path        : list[str]           = [], 
     ) -> None:
+    r"""
+    Estimate halo mass-function from catalog.
+
+    Estimate halo mass-function from an abacus halo catalog. Estimated values will be saved as a CSV table
+    of halo mass (Msun) and mass-function dn/dm (Mpc^-3), in natural log format.
+    """
 
     logger = logging.getLogger()
 
@@ -290,7 +396,7 @@ def massfunc(
 @click.option("--massfunction", "--hmf", 
               type     = str, 
               default  = "tinker08", 
-              help     = "Halo mass-function model used for calculations", )
+              help     = "Halo mass-function model used for calculations or path to the data file", )
 @click.option("--mmin-range", 
               type     = (float, float), 
               default  = ( 1e+11, 1e+14 ), 
@@ -320,6 +426,13 @@ def halomod(
         m1_range           : tuple[float, float]  = ( 1e+13, 1e+15 ),
         gridsize           : int                  = 12, 
     ) -> None:
+    r"""
+    Calculate halo model parameters.
+
+    Calculate the optimum values for halo model, based on observed values of galaxy density and satellite 
+    fraction. Other model parameters including cosmology are selected corresponding to the given abacus 
+    simulation details.
+    """
 
     import yaml
     from galaxy_catalog_generator.misc.halomodel_optimization import HODOptimizer
@@ -328,13 +441,19 @@ def halomod(
 
     # Creating the halo model object 
     simname, redshift = siminfo
-    haloargs = {
-        "Mmin"      : None         , "M1"        : None        , "M0" : None, 
-        "sigmaM"    : sigma_m      , "alpha"     : alpha       ,
-        "scaleSHMF" : scale_shmf   , "slopeSHMF" : slope_shmf  , 
-        "psmodel"   : powerspectrum, "mfmodel"   : massfunction,           
-    }
-    model = buildHaloModel(simname, redshift, **haloargs)
+    model = buildHaloModel(
+        simname, 
+        redshift, 
+        Mmin      = None, 
+        M1        = None, 
+        M0        = None, 
+        sigmaM    = sigma_m, 
+        alpha     = alpha,
+        scaleSHMF = scale_shmf, 
+        slopeSHMF = slope_shmf, 
+        psmodel   = powerspectrum, 
+        mfmodel   = massfunction,
+    )
 
     # Optimizing the model:
     logger.info(f"optimizing halo model...")
@@ -355,12 +474,12 @@ def halomod(
     # Saving file
     logger.info(f"saving model to {output_file.name!r}...")
     with output_file:
-        cosmo = model.cosmo
         yaml.safe_dump(
             {
-                "Settings": {
+                **halomodelDict(model, include_meta = 1), 
+                "Settings" : {
                     "SimName"          : simname,
-                    "Redshift"         : model.redshift,
+                    "Redshift"         : redshift,
                     "GalaxyDensity"    : galaxy_density, 
                     "SatelliteFraction": satellite_fraction,
                     "Mmin_Range"       : mmin_range, 
@@ -372,25 +491,6 @@ def halomod(
                     "OptScore"            : float(res.score),
                     "Status"              : res.status, 
                     "Message"             : res.message,
-                },
-                **haloargs, 
-                "Mmin"    : float(model.Mmin) , 
-                "M0"      : float(model.M0), 
-                "M1"      : float(model.M1), 
-                "Delta"   : model.Delta, 
-                "ns"      : model.psmodel.ns,
-                "sigma8"  : model.psmodel.sigma8,
-                "redshift": model.redshift,
-                "cosmo"   : {
-                    "H0"   : np.array(cosmo.H0).tolist(), 
-                    "Om0"  : cosmo.Om0, 
-                    "Ode0" : cosmo.Ode0, 
-                    "Ob0"  : cosmo.Ob0, 
-                    "w0"   : cosmo.w0, 
-                    "wa"   : cosmo.wa, 
-                    "Tcmb0": np.array(cosmo.Tcmb0).tolist(),
-                    "name" : cosmo.name,
-                    "meta" : dict(cosmo.meta)
                 },
             }, 
             stream    = output_file, 
@@ -423,8 +523,19 @@ def galaxies(
         output_path : str, 
         path        : list[str]  = [],
     ) -> None:
+    r"""
+    Galaxy catalog generation using halos.
+
+    Generate a galaxy catalog using the specified abacus halo catalog and halo model parameters. 
+    NOTE: Always make sure that the halo model parameters match the cosmology setup of the simulation 
+    used and observation for more realistic results.
+    """
 
     import yaml, asdf
+
+    # Galaxy type ID: central galaxies are given the type number 1 and satellite galaxies 2 for  
+    # easily identifying them from the catalog...
+    CEN, SAT = 1, 2 
 
     logger = logging.getLogger()
 
@@ -440,15 +551,6 @@ def galaxies(
     # This file can also contain cosmology model parameters. But, values taken from the simulation
     # metadata are used for consistency. NOTE: Make sure that the model parameters match the cosmology 
     # and redshift of the simulation. 
-    if "cosmo" in haloargs and "meta" in haloargs["cosmo"]:
-        # If the halo model parameter file is generated by this script, it will contain the cosmology and 
-        # some simulation metadata parameters. Compare these values to check if the values agree... 
-        meta = haloargs["cosmo"]["meta"]
-        if "SimName"  in meta and meta["SimName" ] != simname:
-            return logger.error(f"simulation mismatch: {meta['SimName']!r} ({halomodel.name!r}) vs {simname!r} (given)")
-        if "Redshift" in meta and not np.allclose(meta["Redshift"], redshift):
-            return logger.error(f"redshift mismatch: {meta['Redshift']} ({halomodel.name!r}) vs {redshift} (given)")
-        
     haloargs  = { 
         key: haloargs[key] for key in haloargs
                             if key in  [
@@ -467,35 +569,14 @@ def galaxies(
     os.makedirs(output_path, exist_ok = True)
 
     # Header: contains the values of cosmology and simulation parameters
-    header = {
-        "Mmin"     : model.Mmin, 
-        "M0"       : model.M0, 
-        "M1"       : model.M1, 
-        "sigmaM"   : model.sigmaM, 
-        "alpha"    : model.alpha,
-        "scaleSHMF": model.scaleSHMF, 
-        "slopeSHMF": model.slopeSHMF, 
-        "psmodel"  : haloargs["psmodel"], 
-        "mfmodel"  : haloargs["mfmodel"], 
-        "Delta"    : model.Delta, 
-        "ns"       : model.psmodel.ns,
-        "sigma8"   : model.psmodel.sigma8,
-        "redshift" : model.redshift,
-        "H0"       : np.array(model.cosmo.H0).tolist(), 
-        "Om0"      : model.cosmo.Om0, 
-        "Ode0"     : model.cosmo.Ode0, 
-        "Ob0"      : model.cosmo.Ob0, 
-        "w0"       : model.cosmo.w0, 
-        "wa"       : model.cosmo.wa, 
-        "Tcmb0"    : np.array(model.cosmo.Tcmb0).tolist(),
-        **model.cosmo.meta
-    }
+    header = halomodelDict(model, include_meta = True)
         
     # Generate galaxy catalog for halos in each file
     filePattern = re.compile(r"halo_info_(\d+).asdf") # for files like `halo_info_123.asdf`
     for file in files:
 
         # Loading halo data
+        # NOTE: position coordinates are in Mpc and mass are in Msun unit 
         haloID, haloPosition, haloMass = loadCatalog(file)
         
         # Placing central and satellite galaxies in each halo randomly, based on the halo model.
@@ -508,20 +589,17 @@ def galaxies(
             galaxyData    = model.generateSatellitePositions( np.log(massH), posH )
             if galaxyData.shape[0] < 1:
                 continue
-
             cgalaxyPerFile += 1
             sgalaxyPerFile += galaxyData.shape[0]-1
             parentHaloID.append( np.repeat(hid, repeats = galaxyData.shape[0]) )
             galaxyPositions.append( galaxyData[:, 0:3] )
             galaxyMass.append( galaxyData[:, 3] )
-
-            # Central galaxies are given the type number 1 and satellite galaxies 2 for easily 
-            # identifying them from the catalog...
-            galaxyType.append(np.array( [1] + [2] * (galaxyData.shape[0]-1), dtype = np.uint8 ))
+            galaxyType.append(np.array( [CEN] + [SAT] * (galaxyData.shape[0]-1), dtype = np.uint8 ))
 
         galaxyPercentage = 100 * ( cgalaxyPerFile / halosPerFile )
         logger.info(f"placed galaxies in {cgalaxyPerFile} out of {halosPerFile} halos ({galaxyPercentage:.3f}%)")
 
+        # NOTE: position and mass are saved in Mpc/h and Msun/h units, respectrively.
         parentHaloID    = np.hstack(parentHaloID)
         galaxyPositions = np.vstack(galaxyPositions) * model.cosmo.h # galaxy position in Mpc/h
         galaxyMass      = np.hstack(galaxyMass)      * model.cosmo.h # galaxy mass in Msun/h
@@ -529,8 +607,8 @@ def galaxies(
         
         # Wrapping around the coordinates that falls outside the simulation boxsize, with a 
         # periodic boundary condition, as in the original simulation...
-        boxsize = model.cosmo.meta["BoxSize"]
-        galaxyPositions = ( galaxyPositions + 0.5*boxsize ) % boxsize - 0.5*boxsize
+        boxsize = model.cosmo.meta["boxsize"] # in Mpc/h
+        galaxyPositions = ( galaxyPositions + 0.5*boxsize ) % boxsize - 0.5*boxsize # in Mpc/h
 
         # Saving the catalog to a file in output path. File index is same as the halo file index
         outputFile = os.path.join(
@@ -541,11 +619,9 @@ def galaxies(
         af = asdf.AsdfFile({
             "header"    : {
                 **header, 
-                "statistics": {
-                    "halosProcessed"   : halosPerFile, 
-                    "centralGalaxies"  : cgalaxyPerFile, 
-                    "satelliteGalaxies": sgalaxyPerFile,
-                },
+                "halosProcessed"   : halosPerFile, 
+                "centralGalaxies"  : cgalaxyPerFile, 
+                "satelliteGalaxies": sgalaxyPerFile,
             }, 
             "data"      : {
                 "parentHaloID"  : parentHaloID, 
@@ -560,54 +636,6 @@ def galaxies(
     logger.info("galaxy catalog generation completed! :)")
     return
 
-def _main():
-
-    import logging.config, warnings
-    
-    warnings.catch_warnings(action="ignore")
-
-    # Configure the loggers
-    logging.config.dictConfig({
-        'version': 1, 
-        'disable_existing_loggers': True, 
-        'formatters': {
-            'default': { 'format': '[ %(asctime)s %(levelname)s %(process)d ] %(message)s' }
-        }, 
-        'handlers': {
-            'stream': {
-                'level': 'INFO', 
-                'formatter': 'default', 
-                'class': 'logging.StreamHandler', 
-                'stream': 'ext://sys.stdout'
-            }, 
-            'file': {
-                'level': 'INFO', 
-                'formatter': 'default', 
-                'class': 'logging.handlers.RotatingFileHandler', 
-                'filename': '.'.join([ os.path.basename(__file__).rsplit('.', 1)[0], "log" ]), 
-                'mode': 'a', 
-                'maxBytes': 2097152, # create a new file if size exceeds 2 MiB
-                'backupCount': 4     # use maximum 4 files
-            }
-        }, 
-        'loggers': {
-            'root': {
-                'level': 'INFO', 
-                'handlers': [
-                    'stream', 
-                    'file'
-                ]
-            }
-        }
-    })
-
-    return cli()
-
 if __name__ == "__main__":
-    _main()
+    cli()
     
-
-
-# logging.basicConfig(level=logging.INFO)
-# galaxies()
-# estimateMassFunction("AbacusSummit_hugebase_c000_ph000", 2., "hmf.csv", search_paths = ["../tests/data"])
