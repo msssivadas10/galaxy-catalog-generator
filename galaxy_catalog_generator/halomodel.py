@@ -57,8 +57,11 @@ class HaloModel:
     Delta : int, default=200
         Halo over-density w.r.to the mean matter density. 
 
-    rng : Generator
+    rng : Generator, optional
         Random number generator to use.
+
+    meta : dict, optional
+        Metadata related to the object. Can be used to store any values related to calculations.
 
     """
     Mmin     : float
@@ -73,6 +76,7 @@ class HaloModel:
     mfmodel  : HaloMassFunction
     Delta    : int = 200
     rng      : Generator = field(default_factory = default_rng, repr = False)
+    meta     : dict      = field(default_factory = dict       , repr = False)
 
     _cmtable: CubicSpline = field(default = None, init = False, repr = False)
 
@@ -94,7 +98,8 @@ class HaloModel:
             sigma8       : float = 1.,
             Delta        : int   = 200,
             seed         : int   = None,
-            mf_loaderargs: dict  = {}, 
+            mf_loaderargs: dict  = None, 
+            meta         : dict  = None,
         ):
         r"""
         Create a halo model object.
@@ -153,7 +158,13 @@ class HaloModel:
         mf_loaderargs : dict
             Keyword arguments passed to ``numpy.loadtxt`` for loading the mass-function data from file.
 
+        meta : dict, optional
+            Metadata related to the object. Can be used to store any values related to calculations.
+
         """
+
+        mf_loaderargs = mf_loaderargs or {}
+        meta          = meta          or {}
         
         assert psmodel in powerspectrum_models, f"unknown power spectrum model: {psmodel}"
         powerspecObject = powerspectrum_models.get(psmodel)(
@@ -192,7 +203,8 @@ class HaloModel:
             psmodel   = powerspecObject, 
             mfmodel   = massfuncObject, 
             Delta     = Delta,
-            rng       = default_rng(seed)
+            rng       = default_rng(seed),
+            meta      = meta,
         )
         return self
     
