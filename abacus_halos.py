@@ -630,7 +630,7 @@ def galaxies(
         
         # Wrapping around the coordinates that falls outside the simulation boxsize, with a 
         # periodic boundary condition, as in the original simulation...
-        boxsize = model.cosmo.meta["boxsize"] # in Mpc/h
+        boxsize = model.meta["boxsize"] # in Mpc/h
         galaxyPositions = ( galaxyPositions + 0.5*boxsize ) % boxsize - 0.5*boxsize # in Mpc/h
 
         # Saving the catalog to a file in output path. File index is same as the halo file index
