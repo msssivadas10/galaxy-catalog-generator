@@ -299,7 +299,12 @@ class MassFunctionData(HaloMassFunction):
         # It is easier to directly calculate the mass-functions dn/dm or dn/dlnm than using f(s), which 
         # needed to be calculated from these values 
 
-        retval = np.exp( self.data(lnm) )
+        lnm = np.asarray(lnm, dtype = np.float64)
+        
+        # Set the value outside the data range to 0;
+        validrange         = np.logical_not( ( lnm < self.data.x[ 0] ) | ( lnm > self.data.x[-1] ) )
+        retval             = np.zeros_like(lnm)
+        retval[validrange] = np.exp( self.data(lnm[validrange]) )
 
         if return_value == "fs":
             # Calculate ``f(s)``, given mass and dn/dm.
