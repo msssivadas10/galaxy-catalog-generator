@@ -113,24 +113,22 @@ def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
     cid = re.search(r"AbacusSummit_\w+_c(\d\d\d)_ph\d\d\d", tree["SimName"]).group(1) 
 
     logger.info(f"creating halo model object...")
-    cosmo = w0waCDM(
-        H0    = tree["H0"      ], 
-        Om0   = tree["Omega_M" ], 
-        Ode0  = tree["Omega_DE"],
-        Ob0   = tree["omega_b" ] / ( 0.01*tree["H0"] )**2,
-        w0    = tree["w0"      ], 
-        wa    = tree["wa"      ], 
-        Tcmb0 = 2.728, # CMB temperature value if fixed as 2.728 K
-        name  = tree["SimName" ],
-    )
+    haloargs = {
+        "Mmin"     : None,
+        "sigmaM"   : 0.  ,
+        "M1"       : None,
+        "M0"       : None,
+        "alpha"    : 1.  ,
+        "scaleSHMF": 0.5 ,
+        "slopeSHMF": 2.  ,
+        **haloargs
+    }
+    for __key in [ "redshift", "cosmo", "ns", "sigma8", "Delta", "meta" ]: 
+        # These values are loaded from metadata...
+        _ = haloargs.pop( __key, None )
+    
     model = HaloModel.create(
-        Mmin      = haloargs.get( "Mmin"     , None ),
-        sigmaM    = haloargs.get( "sigmaM"   , 0.   ),
-        M1        = haloargs.get( "M1"       , None ),
-        M0        = haloargs.get( "M0"       , None ),
-        alpha     = haloargs.get( "alpha"    , 1.   ),
-        scaleSHMF = haloargs.get( "scaleSHMF", 0.5  ),
-        slopeSHMF = haloargs.get( "slopeSHMF", 2.   ),
+        **haloargs,
         redshift  = tree["Redshift"], 
         cosmo     = w0waCDM(
             H0    = tree["H0"      ], 
@@ -151,7 +149,10 @@ def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
     # Save a few other values from the simulation metadata. Only the values of ``simname`` and 
     # ``redshift`` are enough, beacuse using them one can get the full metadata using the package
     # ``abacusnbody.metadata``. 
-    keymapping = { "boxsize": "BoxSize", "particleMass": "ParticleMassHMsun" }
+    keymapping = { 
+        "boxsize"     : "BoxSize"   , "particleMass"    : "ParticleMassHMsun", 
+        "boxsizeMpc"  : "BoxSizeMpc", "particleMassMsun": "ParticleMassMsun" , 
+    }
     model.meta.update({ altkey: tree[key] for altkey, key in keymapping.items() })  
     return model
 
@@ -317,6 +318,7 @@ def massfunc(
     """
 
     logger = logging.getLogger()
+    logger.info("command: massfunc")
 
     # List all catalog files in the given path:
     simname, redshift = siminfo
@@ -324,10 +326,11 @@ def massfunc(
     if not files: return 
 
     # Loading particle mass and boxsize from the metadata:
-    import abacusnbody.metadata
-    header   = abacusnbody.metadata.get_meta(simname, redshift)
-    unitMass = header["ParticleMassMsun"] 
-    boxsize  = header["BoxSizeMpc"]
+    # NOTE: Halo model object is not needed for calculations, but created to get the simulation 
+    # parameters, which will be written as the comments in the output file... 
+    tree     = halomodelDict( model = buildHaloModel(simname, redshift) )
+    unitMass = tree["particleMassMsun"] 
+    boxsize  = tree["boxsizeMpc"]
 
     # Estimating halo mass-function
     massBinEdges = unitMass * np.logspace( np.log10(mass_range[0]), np.log10(mass_range[1]), nbins+1 ) 
@@ -338,18 +341,36 @@ def massfunc(
     
     dlnMassH  = np.diff( np.log( massBinEdges ) )
     massH     = np.sqrt( massBinEdges[1:] * massBinEdges[:-1] )
-    massFunc /= ( boxsize**3 * dlnMassH ) # dn/dm in Mpc^-3
+    massFunc /= ( boxsize**3 * massH * dlnMassH ) # dn/dm in Mpc^-3
 
     nonzeroMask       = massFunc > 0.
     massFunctionTable = np.log( np.stack(( massH[nonzeroMask], massFunc[nonzeroMask] ), axis = -1) )
      
     # Save data as plain text CSV format
-    logger.info(f"saving data to file: {output_file!r}")
+    logger.info(f"saving data to file: {output_file.name!r}")
     with output_file:
+
+        # Header string (comment) contains simulation parameters for quick reference...
+        tree = { 
+            _key: tree[ _key ] for _key in [
+                    "simname", "redshift", "particleMass", "boxsize", "H0", "Om0", "Ode0", "Ob0", 
+                    "w0", "wa", "ns", "sigma8", "Tcmb0", "Delta",
+            ] 
+        }
+        tree["table"] = {
+            "columns": [
+                { "name": "mass", "fmt": "log", "unit": "Msun"   },
+                { "name": "dndm", "fmt": "log", "unit": "Mpc^-3" },
+            ],
+            "size": np.size(massFunctionTable, 0)
+        }
+
+        import yaml
+        
         np.savetxt(
             output_file, 
             massFunctionTable, 
-            header    = f" simname: {simname}\n redshift: {redshift}\n mass (Msun), dndm (Mpc^-3)",
+            header    = yaml.safe_dump(tree, explicit_start = True, explicit_end = True, sort_keys = False),
             delimiter = ',',
             comments  = '#'
         )
@@ -438,6 +459,7 @@ def halomod(
     from galaxy_catalog_generator.misc.halomodel_optimization import HODOptimizer
 
     logger = logging.getLogger()
+    logger.info("command: halomod")
 
     # Creating the halo model object 
     simname, redshift = siminfo
@@ -538,6 +560,7 @@ def galaxies(
     CEN, SAT = 1, 2 
 
     logger = logging.getLogger()
+    logger.info("command: galaxies")
 
     # List all catalog files in the given path:
     simname, redshift = siminfo
