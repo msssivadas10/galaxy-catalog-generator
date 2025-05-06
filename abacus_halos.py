@@ -54,18 +54,17 @@ def listCatalogs(simname: str, redshift: float, search_paths: list[str] = []) ->
         globResult = glob.glob( os.path.join(path, tailPath) )
         if globResult: break
 
-    filePattern = re.compile(r"halo_info_(\d+).asdf") # for files like `halo_info_123.asdf`
-    files       = [
-        file for file, _ in sorted(
-            # Filter out only the files with names matchng the pattern and sorting based on the
-            # integer index: 
-            filter(
-                lambda a: a[1], 
-                [ ( file, filePattern.match(os.path.basename(file)) ) for file in globResult ]
-            ), 
-            key  = lambda a: int( a[1].group(1) ), 
-        )
-    ]
+    # Filter out only the files with names matchng the pattern and sorting based on the
+    # integer index: 
+    _files = { 
+        int( m.group(1) ): m.string 
+            for m in map( 
+                lambda fn: re.search(r"halo_info_(\d{3}).asdf", fn), # for files like `halo_info_123.asdf`
+                globResult 
+            ) 
+            if m 
+    }
+    files  = [ _files[idx] for idx in sorted(_files) ]
 
     if not files: 
         return logger.info(f"no files for simulation {simname!r} at redshift {redshift}: exiting...")
