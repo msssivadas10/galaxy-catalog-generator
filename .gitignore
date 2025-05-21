@@ -3,3 +3,5 @@ __pycache__
 *.log
 *.dat
 test.py
+out/
+logs/
