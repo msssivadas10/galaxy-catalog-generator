@@ -212,7 +212,7 @@ def count(
     os.makedirs(output_path, exist_ok = True)
 
     # Load mass binedges from the given file
-    massBinEdges, massBins = [ 0., np.inf ], 1
+    massBinEdges, massBins = np.array([ 0., np.inf ]), 1
     if massbins and particle == "halos":
         with massbins:
             massBinEdges = np.loadtxt(massbins, comments = '#')
@@ -280,15 +280,16 @@ def count(
         xedgesList.append(xedges)
 
         with asdf.AsdfFile({
-                "header": {
+                "header" : {
                     **header, 
                     "PartitionIndex" : i, 
                     "PartitionRange" : [ xa, xb ],
                 }, 
-                "data": {
+                "data" : {
                     "count"  : np.zeros(( _gridsize, gridsize, gridsize, massBins ), dtype = np.int64), 
                     "xedges" : xedges, 
-                    "yedges" : qedges, 
+                    "yedges" : qedges,
+                    "medges" : massBinEdges, # NOTE: mass bins only makes sense for halo particles...
                 },
             }) as af:
             file = os.path.join(output_path, f"{particle}_count_{i:03d}.asdf")
