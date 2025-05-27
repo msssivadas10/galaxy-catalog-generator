@@ -5,7 +5,7 @@
 
 __version__ = "0.1a"
 
-ARRAY_SIZE_LIMIT = 536870912 # maximum size limit for count file: 512 MB
+ARRAY_SIZE_LIMIT = 536870912 # maximum size limit for count file: 512 MiB
 
 import os, os.path, glob, re, click, logging, numpy as np
 from typing import TextIO, Literal, Any
@@ -213,7 +213,7 @@ def count(
 
     # Load mass binedges from the given file
     massBinEdges, massBins = [ 0., np.inf ], 1
-    if massbins:
+    if massbins and particle == "halos":
         with massbins:
             massBinEdges = np.loadtxt(massbins, comments = '#')
             massBins     = len(massBinEdges) - 1
@@ -241,7 +241,7 @@ def count(
     logger.info(f"using cellsize {cellsize:3g} Mpc/h and {gridsize}^3 cells...")
 
     # Based on the total size of the array, the cell array is partitioned into multiple slabs along
-    # X direction, so that the total size of a slab will always be < 500 MB. This will make sure the 
+    # X direction, so that the total size of a slab will always be < 500 MiB. This will make sure the 
     # enough memory available, as most systems will have at least 4 GB of RAM :)   
     totalArraySize   = gridsize**3 * massBins * 8 # total array size in bytes
     if totalArraySize > ARRAY_SIZE_LIMIT:
@@ -255,21 +255,29 @@ def count(
         slabCount     = 1
         newGridsizeX  = gridsize
         remGridsizeX  = 0 
-        
+    
+    # Cell edges: cells along y and z axis are the same, and span the entire space. Cells
+    # along the x axis is different for different partitions...  
+    qedges     = np.arange(gridsize+1) * cellsize - 0.5*boxsize # cell edges along y or z
+    xedgesList = [] # cell edges along x axis
+
     # Create the partitions and initialize the count to 0, save as ASDF:
     partitionSize, partitionEdges, outputFiles = [], [ -0.5*boxsize ], []
     for i in range(slabCount):
-        _xgs = newGridsizeX
+        _gridsize = newGridsizeX
         if remGridsizeX > 0:
-            _xgs         += 1
+            _gridsize    += 1
             remGridsizeX -= 1
 
         # X range for the partition:
         xa = partitionEdges[-1]
-        xb = xa + _xgs * cellsize
+        xb = xa + _gridsize * cellsize
         
-        partitionSize.append(_xgs)
+        partitionSize.append(_gridsize)
         partitionEdges.append(xb)
+
+        xedges = np.arange(_gridsize+1) * cellsize + xa 
+        xedgesList.append(xedges)
 
         with asdf.AsdfFile({
                 "header": {
@@ -277,19 +285,17 @@ def count(
                     "PartitionIndex" : i, 
                     "PartitionRange" : [ xa, xb ],
                 }, 
-                "data": np.zeros(( _xgs, gridsize, gridsize, massBins ), dtype = np.int64),
+                "data": {
+                    "count"  : np.zeros(( _gridsize, gridsize, gridsize, massBins ), dtype = np.int64), 
+                    "xedges" : xedges, 
+                    "yedges" : qedges, 
+                },
             }) as af:
             file = os.path.join(output_path, f"{particle}_count_{i:03d}.asdf")
             af.write_to( file )
             outputFiles.append( file )
 
     # ====================================== Count Calculation =========================================== #
-
-    qedges = np.arange(gridsize+1) * cellsize - 0.5*boxsize # cell edges along y or z
-    xedgesList = [
-        np.arange(_size+1) * cellsize + _shift 
-            for _size, _shift in zip(partitionSize, partitionEdges)
-    ] # cell edges along x axis
 
     for fn in files:
 
@@ -336,7 +342,7 @@ def count(
 
             logger.info(f"updating data in {outputFile!r}...")
             with asdf.open( outputFile, mode="rw" ) as af:
-                filearr     = af['data']
+                filearr     = af['data']["count"]
                 filearr[:] += arr[:] 
                 af.update() # save changes 
         
