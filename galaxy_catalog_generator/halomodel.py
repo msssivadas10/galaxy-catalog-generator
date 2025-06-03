@@ -668,7 +668,7 @@ class HaloModel:
             return galaxyCount * self.haloMassFunction(lnm, return_value = "dndlnm")
 
         retval, abserr = quad( integrand, a = a, b = b )
-        retval /= self.averageHaloDensity(lnma = lnma, lnmb = lnmb) # normalizing with halo density
+        # retval /= self.averageHaloDensity(lnma = lnma, lnmb = lnmb) # normalizing with halo density
         return retval
 
     def averageSatelliteFraction(
@@ -706,7 +706,7 @@ class HaloModel:
             return galaxyCount * self.haloMassFunction(lnm, return_value = "dndlnm")
 
         retval, abserr = quad( integrand, a = a, b = b )
-        retval /= self.averageHaloDensity(lnma = lnma, lnmb = lnmb) # normalizing with halo density
+        # retval /= self.averageHaloDensity(lnma = lnma, lnmb = lnmb) # normalizing with halo density
         return retval / self.averageGalaxyDensity(lnma, lnmb)
     
 
