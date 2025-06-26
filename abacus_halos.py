@@ -793,6 +793,7 @@ def corrfunc(
         X2 = R1[:,0], Y2 = R1[:,1], Z2 = R1[:,2], 
         **kwargs, 
     )
+    D1R2 = D1R2["npairs"]
     
     if autocorr:
         # Here, D2 catalog is same as D1 catalog, so D1D2 is the number of pairs in the D1
@@ -803,6 +804,7 @@ def corrfunc(
             X1 = D1[:,0], Y1 = D1[:,1], Z1 = D1[:,2], 
             **kwargs, 
         )
+        D1D2 = D1D2["npairs"]
 
         D2R1 = D1R2
     else:
@@ -814,14 +816,16 @@ def corrfunc(
             X2 = D2[:,0], Y2 = D2[:,1], Z2 = D2[:,2], 
             **kwargs, 
         )     
+        D1D2 = D1D2["npairs"]
     
         logger.info(f"counting pairs of D2 and R...")
-        D2R1  = DD(
+        D2R1 = DD(
             autocorr = 0, 
             X1 = R1[:,0], Y1 = R1[:,1], Z1 = R1[:,2], 
             X2 = D2[:,0], Y2 = D2[:,1], Z2 = D2[:,2], 
             **kwargs, 
         )
+        D2R1 = D2R1["npairs"]
     
     logger.info(f"counting pairs of R and R...")
     R1R2 = DD(
@@ -829,6 +833,7 @@ def corrfunc(
         X1 = R1[:,0], Y1 = R1[:,1], Z1 = R1[:,2], 
         **kwargs, 
     )
+    R1R2 = R1R2["npairs"]
     
     # -- Normalized pair counts:
     d1d2 = D1D2 / ( D1.shape[0]*D2.shape[0] )
@@ -881,10 +886,10 @@ def corrfunc(
         "data" : {
             "r"    : rCenter, 
             "xi"   : xi,
-            "D1D2" : D1D2["npairs"], 
-            "D1R2" : D1R2["npairs"],
-            "D2R1" : D2R1["npairs"],
-            "R1R2" : R1R2["npairs"], 
+            "D1D2" : D1D2, 
+            "D1R2" : D1R2,
+            "D2R1" : D2R1,
+            "R1R2" : R1R2, 
         }
     })
     af.write_to(output_file, all_array_compression = "zlib")
