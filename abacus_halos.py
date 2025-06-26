@@ -850,10 +850,10 @@ def corrfunc(
         "data" : {
             "r"    : rCenter, 
             "xi"   : xi,
-            "D1D2" : D1D2, 
-            "D1R"  : D1R,
-            "D2R"  : D2R,
-            "RR"   : RR, 
+            "D1D2" : D1D2["npairs"], 
+            "D1R"  : D1R["npairs"],
+            "D2R"  : D2R["npairs"],
+            "RR"   : RR["npairs"], 
         }
     })
     af.write_to(output_file, all_array_compression = "zlib")
