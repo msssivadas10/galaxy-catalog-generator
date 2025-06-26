@@ -315,11 +315,11 @@ def cli() -> None:
               required = True, 
               callback = siminfoValidator, 
               help     = "A tuple of a valid abacus simulation name and redshift value", )
-@click.option("--output-file", 
+@click.option("-o", "--output-file", 
               type     = click.File("w"), 
               required = True, 
               help     = "Filename for the output (text CSV format)", )
-@click.option("--mass-range", 
+@click.option("-m", "--mass-range", 
               type     = (float, float), 
               default  = ( 10., 1e+04 ), 
               callback = rangeValidator, 
@@ -418,7 +418,7 @@ def massfunc(
               type     = click.FloatRange(0., 1.), 
               required = True, 
               help     = "Observed value of the satellite galaxy fraction", )
-@click.option("--output-file", 
+@click.option("-o", "--output-file", 
               type     = click.File("w"), 
               required = True, 
               help     = "Filename for the output (YAML format)", )
