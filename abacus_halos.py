@@ -3,9 +3,9 @@
 # CLI tools to process abacus halo catalogs and generate data.
 # 
 
-__version__ = "0.1a"
+__version__ = "0.2a"
 
-import os, os.path, glob, re, click, logging, numpy as np
+import os, os.path, glob, re, click, logging, asdf, yaml, numpy as np
 from typing import IO, Any
 from numpy.typing import NDArray
 from astropy.cosmology import w0waCDM
@@ -14,7 +14,7 @@ from galaxy_catalog_generator.halomodel import HaloModel
 
 # Look-up table to get `sigma_8` values used in the abacus summit cosmologies. This data is not in the
 # catalog headers, so it is taken from <https://abacussummit.readthedocs.io/en/latest/cosmologies.html>.
-AbacusCosmologySigma8Table = {
+sigma8Table = {
     "000": 0.807952, "001": 0.776779, "002": 0.808189, "003": 0.855190, "004": 0.749999, "009": 0.811362, 
     "010": 0.823630, "011": 0.905993, "012": 0.827899, "013": 0.813715, "014": 0.800000, "015": 0.835005, 
     "016": 0.793693, "017": 0.815903, "018": 0.819708, "019": 0.805050, "020": 0.811350, "021": 0.849842,   
@@ -95,6 +95,40 @@ def loadCatalog(fn: str) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArra
     
     return haloID, haloPosition, haloMass
 
+def loadCatalog1(files: list[str], Nrange: tuple[float, float] = (0., np.inf)) -> NDArray[np.float64]:
+    r"""
+    Load data from a abacus halo catalog file. Halo position in Mpc/h and mass in Msun/h 
+    are returned. 
+    
+    This is different from ``loadCatalog``, since it loads data from all catalog files in a
+    simulation, with an option for filtering based on halo mass. If no mass range is provided, 
+    or the range is very large, the loaded data would also be large and may cause memory 
+    issues.  
+    """
+
+    logger = logging.getLogger()
+    
+    Nmin, Nmax = Nrange
+    retval     = []
+    for fn in files:
+        logger.info(f"loading halo catalog from file: {fn!r}, mass range: [{Nmin}, {Nmax}]")
+        catalog = CompaSOHaloCatalog(fn, cleaned = False, fields  = ["SO_central_particle", "N"])
+        
+        # Halo mass in Msun/h
+        unitMass = catalog.header["ParticleMassHMsun"]
+        haloMass = np.array( catalog.halos["N"] )
+
+        # -- Filtering based on mass
+        mask     = ( haloMass >= Nmin ) & ( haloMass <= Nmax )
+        haloMass = haloMass[mask] * unitMass
+        
+        # Halo position coordinates in Mpc/h units
+        haloPosition = np.array( catalog.halos["SO_central_particle"] )[mask, :]
+
+        retval.append( np.hstack([haloPosition, haloMass.reshape((-1, 1))]) )
+
+    return np.vstack(retval)
+
 def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
     r"""
     Initialize a halo model object using the cosmology parameters corresponding to the given abacus 
@@ -108,9 +142,6 @@ def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
     logger.info(f"loading metatdata for simulation {simname!r}for redshift {redshift}...")
     tree = abacusnbody.metadata.get_meta(simname, redshift)
     
-    # Get the id of the cosmology model from simulation name
-    cid = re.search(r"AbacusSummit_\w+_c(\d\d\d)_ph\d\d\d", tree["SimName"]).group(1) 
-
     logger.info(f"creating halo model object...")
     haloargs = {
         "Mmin"     : None,
@@ -140,7 +171,7 @@ def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
             name  = tree["SimName" ],
         ), 
         ns        = tree["n_s"], 
-        sigma8    = AbacusCosmologySigma8Table[cid], 
+        sigma8    = sigma8Table[ re.search(r"c(\d{3})", tree["SimName"]).group(1) ], 
         Delta     = tree["SODensity"][0],
         meta      = {},
     )
@@ -210,14 +241,14 @@ def siminfoValidator(ctx: Any, param: Any, value: tuple[str, float]) -> tuple[st
     
     return value
 
-def massrangeValidator(ctx: Any, param: Any, value: tuple[float, float]) -> tuple[float, float]:  
+def rangeValidator(ctx: Any, param: Any, value: tuple[float, float]) -> tuple[float, float]:  
     r"""
-    Check if the value is a valid mass range specifier.
+    Check if the value is a valid range specifier for a positive real number.
     """
       
     try:
         left, right = value
-        assert left > 0. and right > 0, "mass values must be positive"
+        assert left > 0. and right > 0, "values must be positive"
         assert left < right, "lower limit must be less than upper limit"
     except Exception as e:
         raise click.BadParameter(e)  
@@ -291,7 +322,7 @@ def cli() -> None:
 @click.option("--mass-range", 
               type     = (float, float), 
               default  = ( 10., 1e+04 ), 
-              callback = massrangeValidator, 
+              callback = rangeValidator, 
               help     = "Values of the left- and right-most mass bins in particle mass unit", )
 @click.option("--nbins", 
               type     = click.IntRange(min = 2), 
@@ -364,8 +395,6 @@ def massfunc(
             "size": np.size(massFunctionTable, 0)
         }
 
-        import yaml
-        
         np.savetxt(
             output_file, 
             massFunctionTable, 
@@ -420,12 +449,12 @@ def massfunc(
 @click.option("--mmin-range", 
               type     = (float, float), 
               default  = ( 1e+11, 1e+14 ), 
-              callback = massrangeValidator, 
+              callback = rangeValidator, 
               help     = "Search range for parameter Mmin (or M0) in Msun units", )
 @click.option("--m1-range", 
               type     = (float, float), 
               default  = ( 1e+13, 1e+15 ), 
-              callback = massrangeValidator, 
+              callback = rangeValidator, 
               help     = "Search range for parameter M1 in Msun units", )
 @click.option("--gridsize", 
               type     = click.IntRange(min = 4), 
@@ -454,7 +483,6 @@ def halomod(
     simulation details.
     """
 
-    import yaml
     from galaxy_catalog_generator.misc.halomodel_optimization import HODOptimizer
 
     logger = logging.getLogger()
@@ -551,8 +579,6 @@ def galaxies(
     NOTE: Always make sure that the halo model parameters match the cosmology setup of the simulation 
     used and observation for more realistic results.
     """
-
-    import yaml, asdf
 
     # Galaxy type ID: central galaxies are given the type number 1 and satellite galaxies 2 for  
     # easily identifying them from the catalog...
@@ -656,6 +682,176 @@ def galaxies(
         af.close()
         
     logger.info("galaxy catalog generation completed! :)")
+    return
+
+@cli.command
+@click.option("--siminfo", 
+              type     = (str, float), 
+              required = True, 
+              callback = siminfoValidator, 
+              help     = "A tuple of a valid abacus simulation name and redshift value", )
+@click.option("-o", "--output-file", 
+              type     = click.File("wb"), 
+              required = True, 
+              help     = "Filename for the output (text CSV format)", )
+@click.option("-m1", "--mrange1", 
+              type     = (float, float), 
+              default  = (0., np.inf),
+              callback = rangeValidator, 
+              help     = "Mass interval #1 in particle mass unit, for sub-catalog", )
+@click.option("-m2", "--mrange2", 
+              type     = (float, float), 
+              default  = (0., np.inf),
+              callback = rangeValidator, 
+              help     = "Mass interval #2 in particle mass unit, for sub-catalog", )
+@click.option("-r", "--rrange", 
+              type     = click.Tuple((float, float)), 
+              required = True,
+              callback = rangeValidator, 
+              help     = "Distance bins range in Mpc/h", )
+@click.option("--rbins", 
+              type     = click.IntRange(min = 2), 
+              default  = 32, 
+              help     = "Number of distance bins", )
+@click.option("--nthreads", 
+              type     = click.IntRange(min = 0), 
+              default  = 0, 
+              help     = "Number of threads to use (0 for using all available threads)", )
+@click.option("-p", "--path" , 
+              type     = click.Path(exists = True), 
+              default  = [ os.getcwd() ], 
+              multiple = True,  
+              help     = "Paths to look for simulation catalog files", )
+def corrfunc(
+        siminfo     : tuple[str, float], 
+        output_file : IO, 
+        mrange1     : tuple[float, float],
+        mrange2     : tuple[float, float],
+        rrange      : tuple[float, float],
+        rbins       : int       = 16, 
+        nthreads    : int       = 0,
+        path        : list[str] = [],
+    ) -> None:
+    r"""
+    Estimate halo correlation function from catalog.
+
+    Estimate halo 2-point correlation function (auto and cross) from an abacus halo catalog. 
+    Estimated values will be saved as an asdf file.
+    """
+
+    from Corrfunc.theory.DD import DD
+    from Corrfunc.utils import convert_3d_counts_to_cf
+
+    logger = logging.getLogger()
+    logger.info("command: corrfunc")
+
+    # List all catalog files in the given path:
+    simname, redshift = siminfo
+    files = listCatalogs(simname, redshift, path)
+    if not files: return 
+
+    # Loading catalogs: if the ranges are same, auto correlation is calculated and single
+    # catalog is needed 
+    autocorr = np.allclose(mrange1, mrange2)
+    D1 = loadCatalog1(files, Nrange = mrange1)
+    D2 = loadCatalog1(files, Nrange = mrange2) if not autocorr else D1
+
+    # Generating random points
+    import abacusnbody.metadata
+    tree    = abacusnbody.metadata.get_meta(simname, redshift)
+    boxsize = tree["BoxSize"] 
+
+    Nr = 3*max( D1.shape[0], D2.shape[0] )
+
+    logger.info(f"generating random catalog of size {Nr}...")
+    R1 = np.random.uniform(0., boxsize, size = [Nr, 3])
+
+    # Calculating correlation function
+    rBinEdges = np.linspace(rrange[0], rrange[1], rbins+1)
+    rCenter   = np.sqrt( rBinEdges[1:] * rBinEdges[:-1] ) 
+
+    # -- Calculating pair counts D1D2, D1R, D2R and RR for LS estimator:
+    kwargs = dict(
+        nthreads = nthreads or os.cpu_count(), 
+        binfile  = rBinEdges, 
+        periodic = True, 
+        boxsize  = boxsize,
+        verbose  = False,
+    ) # common args to all pair count calls
+
+    # Calculating number of pairs between D1 and R catalogs, D1R, as it is common if D2 is
+    # same as D1 or not...  
+    logger.info(f"counting pairs of D1 and R...")
+    D1R  = DD(
+        autocorr = 0, 
+        X1 = D1[:,0], Y1 = D1[:,1], Z1 = D1[:,2], 
+        X2 = R1[:,0], Y2 = R1[:,1], Z2 = R1[:,2], 
+        **kwargs, 
+    )
+    
+    if autocorr:
+        # Here, D2 catalog is same as D1 catalog, so D1D2 is the number of pairs in the D1
+        # catalog only (``autocorr = 1``) and D2R is same as D1R... 
+        logger.info(f"counting pairs of D1 and D1...")
+        D1D2 = DD(
+            autocorr = 1, 
+            X1 = D1[:,0], Y1 = D1[:,1], Z1 = D1[:,2], 
+            **kwargs, 
+        )
+
+        D2R  = D1R
+    else:
+        # D1 and D2 are different, calculating D1D2 and D2R... 
+        logger.info(f"counting pairs of D1 and D2...")
+        D1D2 = DD(
+            autocorr = 0, 
+            X1 = D1[:,0], Y1 = D1[:,1], Z1 = D1[:,2], 
+            X2 = D2[:,0], Y2 = D2[:,1], Z2 = D2[:,2], 
+            **kwargs, 
+        )     
+    
+        logger.info(f"counting pairs of D2 and R...")
+        D2R  = DD(
+            autocorr = 0, 
+            X1 = R1[:,0], Y1 = R1[:,1], Z1 = R1[:,2], 
+            X2 = D2[:,0], Y2 = D2[:,1], Z2 = D2[:,2], 
+            **kwargs, 
+        )
+    
+    logger.info(f"counting pairs of R and R...")
+    RR   = DD(
+        autocorr = 1, 
+        X1 = R1[:,0], Y1 = R1[:,1], Z1 = R1[:,2], 
+        **kwargs, 
+    )
+    
+    # -- Correlation function:
+    logger.info(f"calculating correlation function (LS estimator)...")
+    xi = convert_3d_counts_to_cf(D1.shape[0], D2.shape[0], Nr, Nr, D1D2, D1R, D2R, RR, estimator = 'LS')
+
+    # Saving the output file:
+    logger.info(f"saving correlation values to file {output_file.name!r}")
+    af = asdf.AsdfFile({
+        "header" : {
+            k: tree[k] for k in [ 
+                "SimName", "Redshift", "H0", "Omega_M", "Omega_DE", "omega_b", 
+                "w0", "wa", "n_s", "SODensity", "BoxSize", "ParticleMassHMsun", 
+                "BoxSizeMpc", "ParticleMassMsun",
+            ]
+        } | {
+            "sigma8" : sigma8Table[ re.search(r"c(\d{3})", tree["SimName"]).group(1) ], 
+            "NRange1" : list( mrange1 ), 
+            "NRange2" : list( mrange2 ), 
+        }, 
+        "data" : {
+            "r"  : rCenter, 
+            "xi" : xi,
+        }
+    })
+    af.write_to(output_file, all_array_compression = "zlib")
+    af.close()
+
+    logger.info("correlation calculation completed!...")
     return
 
 if __name__ == "__main__":
