@@ -767,7 +767,7 @@ def corrfunc(
     R1 = np.random.uniform(0., boxsize, size = [Nr, 3])
 
     # Calculating correlation function
-    rBinEdges = np.linspace(rrange[0], rrange[1], rbins+1)
+    rBinEdges = np.logspace( np.log10(rrange[0]), np.log10(rrange[1]), rbins+1 )
     rCenter   = np.sqrt( rBinEdges[1:] * rBinEdges[:-1] ) 
 
     # -- Calculating pair counts D1D2, D1R, D2R and RR for LS estimator:
