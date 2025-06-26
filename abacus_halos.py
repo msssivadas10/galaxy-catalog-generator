@@ -732,7 +732,7 @@ def corrfunc(
         mrange1     : tuple[float, float],
         mrange2     : tuple[float, float],
         rrange      : tuple[float, float],
-        esimtator   : Literal["nat", "ls", "ham", "dp"] = "nat",
+        estimtator  : Literal["nat", "ls", "ham", "dp"] = "nat",
         rbins       : int       =  16, 
         nthreads    : int       =  0,
         path        : list[str] =  [],
@@ -837,22 +837,22 @@ def corrfunc(
     r1r2 = R1R2 / ( R1.shape[0]*R1.shape[0] )
 
     # -- Correlation function:
-    esimtator     = esimtator.lower()
+    estimtator    = estimtator.lower()
     estimatorName = {
         "nat" : "Natural", 
         "dp"  : "Davis-Peebles", 
         "ham" : "Hamilton", 
         "ls"  : "Landy-Szalay", 
-    }.get(esimtator, "Landy-Szalay")
+    }.get(estimtator, "Landy-Szalay")
     
     logger.info(f"calculating correlation function using {estimatorName!r} estimator...")
-    if esimtator == "nat":
+    if estimtator == "nat":
         # Natural estimator
         xi = d1d2 / r1r2 - 1.
-    elif esimtator == "dp":
+    elif estimtator == "dp":
         # Davis-Peebles estimator
         xi = 2*d1d2 / (d1r2 + d2r1) + 1.
-    elif esimtator == "ham":
+    elif estimtator == "ham":
         # Hamilton estimator
         xi = (d1d2 / d1r2) * (r1r2 / d2r1) - 1.
     else:
