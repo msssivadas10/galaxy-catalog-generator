@@ -843,7 +843,7 @@ def corrfunc(
             "NRange1"      : list( mrange1 ), 
             "NRange2"      : list( mrange2 ), 
             "CatalogSize1" : D1.shape[0], 
-            "CatalogSize2" : D1.shape[0],
+            "CatalogSize2" : D2.shape[0],
             "RandomSize"   : R1.shape[0],
             "Estimator"    : "LS",  
         }, 
