@@ -839,13 +839,21 @@ def corrfunc(
                 "BoxSizeMpc", "ParticleMassMsun",
             ]
         } | {
-            "sigma8" : sigma8Table[ re.search(r"c(\d{3})", tree["SimName"]).group(1) ], 
-            "NRange1" : list( mrange1 ), 
-            "NRange2" : list( mrange2 ), 
+            "sigma8"       : sigma8Table[ re.search(r"c(\d{3})", tree["SimName"]).group(1) ], 
+            "NRange1"      : list( mrange1 ), 
+            "NRange2"      : list( mrange2 ), 
+            "CatalogSize1" : D1.shape[0], 
+            "CatalogSize2" : D1.shape[0],
+            "RandomSize"   : R1.shape[0],
+            "Estimator"    : "LS",  
         }, 
         "data" : {
-            "r"  : rCenter, 
-            "xi" : xi,
+            "r"    : rCenter, 
+            "xi"   : xi,
+            "D1D2" : D1D2, 
+            "D1R"  : D1R,
+            "D2R"  : D2R,
+            "RR"   : RR, 
         }
     })
     af.write_to(output_file, all_array_compression = "zlib")
