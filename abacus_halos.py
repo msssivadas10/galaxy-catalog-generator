@@ -381,26 +381,27 @@ def massfunc(
     with output_file:
 
         # Header string (comment) contains simulation parameters for quick reference...
-        tree = { 
-            _key: tree[ _key ] for _key in [
-                    "simname", "redshift", "particleMass", "boxsize", "H0", "Om0", "Ode0", "Ob0", 
-                    "w0", "wa", "ns", "sigma8", "Tcmb0", "Delta",
-            ] 
-        }
-        tree["table"] = {
-            "columns": [
-                { "name": "mass", "fmt": "log", "unit": "Msun"   },
-                { "name": "dndm", "fmt": "log", "unit": "Mpc^-3" },
-            ],
-            "size": np.size(massFunctionTable, 0)
-        }
+        import json
+        header = json.dumps({
+                "data": {
+                    "ln_mass" : { "unit": "Msun", "size": np.size(massFunctionTable, 0) }, 
+                    "ln_dndm" : { "unit": "Mpc3", "size": np.size(massFunctionTable, 1) }
+                }, 
+                "header": { 
+                    _key: tree[ _key ] for _key in ["simname", "redshift", "particleMass", "boxsize", 
+                                                    "H0", "Om0", "Ode0", "Ob0", "w0", "wa", "ns", 
+                                                    "sigma8", "Tcmb0", "Delta", ] 
+                }
+            }, 
+            sort_keys = False,
+        )
 
         np.savetxt(
             output_file, 
             massFunctionTable, 
-            header    = yaml.safe_dump(tree, explicit_start = True, explicit_end = True, sort_keys = False),
             delimiter = ',',
-            comments  = '#'
+            comments  = '#', 
+            header    = header,
         )
     return
 
@@ -732,7 +733,7 @@ def corrfunc(
         mrange1     : tuple[float, float],
         mrange2     : tuple[float, float],
         rrange      : tuple[float, float],
-        estimator  : Literal["nat", "ls", "ham", "dp"] = "nat",
+        estimator   : Literal["nat", "ls", "ham", "dp"] = "nat",
         rbins       : int       =  16, 
         nthreads    : int       =  0,
         path        : list[str] =  [],
