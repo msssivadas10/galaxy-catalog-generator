@@ -851,19 +851,40 @@ def corrfunc(
         "ls"  : "Landy-Szalay", 
     }.get(estimator, "Landy-Szalay")
     
+    # TODO: check error calculation
     logger.info(f"calculating correlation function using {estimatorName!r} estimator...")
     if estimator == "nat":
         # Natural estimator
-        xi = d1d2 / r1r2 - 1.
+        xi      = d1d2 / r1r2 - 1.
+        xiError = np.abs(xi + 1) * ( 
+            np.sqrt(d1d2) / d1d2 + 
+            np.sqrt(r1r2) / r1r2
+        ) 
     elif estimator == "dp":
         # Davis-Peebles estimator
-        xi = 2*d1d2 / (d1r2 + d2r1) + 1.
+        y       = (d1r2 + d2r1)
+        xi      = 2*d1d2 / y + 1.
+        xiError = np.abs(xi + 1) * (
+            np.sqrt(d1d2) / d1d2 + 
+            ( np.sqrt(d1r2) + np.sqrt(d2r1) ) / y 
+        )  
     elif estimator == "ham":
         # Hamilton estimator
-        xi = (d1d2 / d1r2) * (r1r2 / d2r1) - 1.
+        xi      = (d1d2 / d1r2) * (r1r2 / d2r1) - 1.
+        xiError = np.abs(xi + 1) * (
+            np.sqrt(d1d2) / d1d2 + 
+            np.sqrt(d1r2) / d1r2 + 
+            np.sqrt(r1r2) / r1r2 + 
+            np.sqrt(d2r1) / d2r1 
+        )  
     else:
         # Landy-Szalay estimator (default)
-        xi = (d1d2 - d1r2 - d2r1 + r1r2) / r1r2
+        y       = (d1d2 - d1r2 - d2r1 + r1r2)
+        xi      = y / r1r2
+        xiError = np.abs(xi + 1) * (
+            ( np.sqrt(d1d2) + np.sqrt(d1r2) + np.sqrt(d2r1) + np.sqrt(r1r2) ) / y + 
+            np.sqrt(r1r2) / r1r2
+        ) 
     # xi = convert_3d_counts_to_cf(D1.shape[0], D2.shape[0], Nr, Nr, D1D2, D1R2, D2R1, R1R2, estimator = 'LS')
 
     # Saving the output file:
@@ -885,12 +906,13 @@ def corrfunc(
             "Estimator"    : estimatorName,  
         }, 
         "data" : {
-            "r"    : rCenter, 
-            "xi"   : xi,
-            "D1D2" : D1D2, 
-            "D1R2" : D1R2,
-            "D2R1" : D2R1,
-            "R1R2" : R1R2, 
+            "r"     : rCenter, 
+            "xi"    : xi,
+            "xiErr" : xiError,
+            "D1D2"  : D1D2, 
+            "D1R2"  : D1R2,
+            "D2R1"  : D2R1,
+            "R1R2"  : R1R2, 
         }
     })
     af.write_to(output_file, all_array_compression = "zlib")
