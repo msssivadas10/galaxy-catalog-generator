@@ -16,10 +16,10 @@ class PairCountData:
     NR1  : int
     NR2  : int
     bins : NDArray[np.float64]
-    D1D2 : NDArray[np.float64]
-    D1R2 : NDArray[np.float64]
-    D2R1 : NDArray[np.float64]
-    R1R2 : NDArray[np.float64]
+    D1D2 : NDArray[np.uint64]
+    D1R2 : NDArray[np.uint64]
+    D2R1 : NDArray[np.uint64]
+    R1R2 : NDArray[np.uint64]
 
     @classmethod
     def countPairs(
