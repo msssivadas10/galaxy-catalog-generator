@@ -40,7 +40,7 @@ class PairCountData:
         Parameters
         ----------
         D1, D2 : ndarray of shape (N, 3)
-            Catalogs. If `D2` is None, autor correlation for `D1` catalog is calculated. Catalog positions
+            Catalogs. If `D2` is None, auto correlation for `D1` catalog is calculated. Catalog positions
             should be in the range `[-boxsize/2, boxsize/2]`.
 
         rbins : sequence of float
