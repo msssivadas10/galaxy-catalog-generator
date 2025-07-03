@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 from astropy.cosmology import w0waCDM
 from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog
 from galaxy_catalog_generator.halomodel import HaloModel
+from galaxy_catalog_generator.misc.correlation import PairCountData
 
 # Look-up table to get `sigma_8` values used in the abacus summit cosmologies. This data is not in the
 # catalog headers, so it is taken from <https://abacussummit.readthedocs.io/en/latest/cosmologies.html>.
@@ -745,9 +746,6 @@ def corrfunc(
     Estimated values will be saved as an asdf file.
     """
 
-    from Corrfunc.theory.DD import DD
-    # from Corrfunc.utils import convert_3d_counts_to_cf
-
     logger = logging.getLogger()
     logger.info("command: corrfunc")
 
@@ -760,132 +758,25 @@ def corrfunc(
     # catalog is needed 
     autocorr = np.allclose(mrange1, mrange2)
     D1 = loadCatalog1(files, Nrange = mrange1)
-    D2 = loadCatalog1(files, Nrange = mrange2) if not autocorr else D1
+    D2 = loadCatalog1(files, Nrange = mrange2) if not autocorr else None
 
-    # Generating random points (using R2 same as R1)
     import abacusnbody.metadata
-    tree    = abacusnbody.metadata.get_meta(simname, redshift)
-    boxsize = tree["BoxSize"] 
-
-    Nr = 3*max( D1.shape[0], D2.shape[0] )
-
-    logger.info(f"generating random catalog of size {Nr}...")
-    R1 = np.random.uniform(0., boxsize, size = [Nr, 3])
+    tree = abacusnbody.metadata.get_meta(simname, redshift)
 
     # Calculating correlation function
+    estimator = estimator.lower()
     rBinEdges = np.logspace( np.log10(rrange[0]), np.log10(rrange[1]), rbins+1 )
     rCenter   = np.sqrt( rBinEdges[1:] * rBinEdges[:-1] ) 
-
-    # -- Calculating pair counts D1D2, D1R2, D2R1 and R1R2 for LS estimator:
-    kwargs = dict(
-        nthreads = nthreads or os.cpu_count(), 
-        binfile  = rBinEdges, 
+    countData = PairCountData.countPairs(
+        D1, 
+        D2, 
+        rBinEdges, 
+        boxsize  = tree["BoxSize"], 
         periodic = True, 
-        boxsize  = boxsize,
-        verbose  = False,
-    ) # common args to all pair count calls
-
-    # Calculating number of pairs between D1 and R2 catalogs, D1R2, as it is common if D2 is
-    # same as D1 or not...  
-    logger.info(f"counting pairs of D1 and R...")
-    D1R2 = DD(
-        autocorr = 0, 
-        X1 = D1[:,0], Y1 = D1[:,1], Z1 = D1[:,2], 
-        X2 = R1[:,0], Y2 = R1[:,1], Z2 = R1[:,2], 
-        **kwargs, 
+        diff_r   = False, 
+        nthreads = nthreads or os.cpu_count(),
     )
-    D1R2 = D1R2["npairs"]
-    
-    if autocorr:
-        # Here, D2 catalog is same as D1 catalog, so D1D2 is the number of pairs in the D1
-        # catalog only (``autocorr = 1``) and D2R1 is same as D1R2... 
-        logger.info(f"counting pairs of D1 and D1...")
-        D1D2 = DD(
-            autocorr = 1, 
-            X1 = D1[:,0], Y1 = D1[:,1], Z1 = D1[:,2], 
-            **kwargs, 
-        )
-        D1D2 = D1D2["npairs"]
-
-        D2R1 = D1R2
-    else:
-        # D1 and D2 are different, calculating D1D2 and D2R1... 
-        logger.info(f"counting pairs of D1 and D2...")
-        D1D2 = DD(
-            autocorr = 0, 
-            X1 = D1[:,0], Y1 = D1[:,1], Z1 = D1[:,2], 
-            X2 = D2[:,0], Y2 = D2[:,1], Z2 = D2[:,2], 
-            **kwargs, 
-        )     
-        D1D2 = D1D2["npairs"]
-    
-        logger.info(f"counting pairs of D2 and R...")
-        D2R1 = DD(
-            autocorr = 0, 
-            X1 = R1[:,0], Y1 = R1[:,1], Z1 = R1[:,2], 
-            X2 = D2[:,0], Y2 = D2[:,1], Z2 = D2[:,2], 
-            **kwargs, 
-        )
-        D2R1 = D2R1["npairs"]
-    
-    logger.info(f"counting pairs of R and R...")
-    R1R2 = DD(
-        autocorr = 1, 
-        X1 = R1[:,0], Y1 = R1[:,1], Z1 = R1[:,2], 
-        **kwargs, 
-    )
-    R1R2 = R1R2["npairs"]
-    
-    # -- Normalized pair counts:
-    d1d2 = D1D2 / ( D1.shape[0]*D2.shape[0] )
-    d1r2 = D1R2 / ( D1.shape[0]*R1.shape[0] )
-    d2r1 = D2R1 / ( D2.shape[0]*R1.shape[0] )
-    r1r2 = R1R2 / ( R1.shape[0]*R1.shape[0] )
-
-    # -- Correlation function:
-    estimator     = estimator.lower()
-    estimatorName = {
-        "nat" : "Natural", 
-        "dp"  : "Davis-Peebles", 
-        "ham" : "Hamilton", 
-        "ls"  : "Landy-Szalay", 
-    }.get(estimator, "Landy-Szalay")
-    
-    # TODO: check error calculation
-    logger.info(f"calculating correlation function using {estimatorName!r} estimator...")
-    if estimator == "nat":
-        # Natural estimator
-        xi      = d1d2 / r1r2 - 1.
-        xiError = np.abs(xi + 1) * ( 
-            np.sqrt(d1d2) / d1d2 + 
-            np.sqrt(r1r2) / r1r2
-        ) 
-    elif estimator == "dp":
-        # Davis-Peebles estimator
-        y       = (d1r2 + d2r1)
-        xi      = 2*d1d2 / y + 1.
-        xiError = np.abs(xi + 1) * (
-            np.sqrt(d1d2) / d1d2 + 
-            ( np.sqrt(d1r2) + np.sqrt(d2r1) ) / y 
-        )  
-    elif estimator == "ham":
-        # Hamilton estimator
-        xi      = (d1d2 / d1r2) * (r1r2 / d2r1) - 1.
-        xiError = np.abs(xi + 1) * (
-            np.sqrt(d1d2) / d1d2 + 
-            np.sqrt(d1r2) / d1r2 + 
-            np.sqrt(r1r2) / r1r2 + 
-            np.sqrt(d2r1) / d2r1 
-        )  
-    else:
-        # Landy-Szalay estimator (default)
-        y       = (d1d2 - d1r2 - d2r1 + r1r2)
-        xi      = y / r1r2
-        xiError = np.abs(xi + 1) * (
-            ( np.sqrt(d1d2) + np.sqrt(d1r2) + np.sqrt(d2r1) + np.sqrt(r1r2) ) / y + 
-            np.sqrt(r1r2) / r1r2
-        ) 
-    # xi = convert_3d_counts_to_cf(D1.shape[0], D2.shape[0], Nr, Nr, D1D2, D1R2, D2R1, R1R2, estimator = 'LS')
+    xi, xiError = countData.correlation(estimator)
 
     # Saving the output file:
     logger.info(f"saving correlation values to file {output_file.name!r}")
@@ -900,19 +791,19 @@ def corrfunc(
             "sigma8"       : sigma8Table[ re.search(r"c(\d{3})", tree["SimName"]).group(1) ], 
             "NRange1"      : list( mrange1 ), 
             "NRange2"      : list( mrange2 ), 
-            "CatalogSize1" : D1.shape[0], 
-            "CatalogSize2" : D2.shape[0],
-            "RandomSize"   : R1.shape[0],
-            "Estimator"    : estimatorName,  
+            "CatalogSize1" : countData.ND1, 
+            "CatalogSize2" : countData.ND2,
+            "RandomSize"   : countData.NR1,
+            "Estimator"    : estimator,  
         }, 
         "data" : {
             "r"     : rCenter, 
             "xi"    : xi,
             "xiErr" : xiError,
-            "D1D2"  : D1D2, 
-            "D1R2"  : D1R2,
-            "D2R1"  : D2R1,
-            "R1R2"  : R1R2, 
+            "D1D2"  : countData.D1D2, 
+            "D1R2"  : countData.D1R2,
+            "D2R1"  : countData.D2R1,
+            "R1R2"  : countData.R1R2, 
         }
     })
     af.write_to(output_file, all_array_compression = "zlib")
