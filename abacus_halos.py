@@ -304,7 +304,7 @@ def cli() -> None:
               callback = siminfoValidator, 
               help     = "A tuple of a valid abacus simulation name and redshift value", )
 @click.option("-o", "--output-file", 
-              type     = click.File("w"), 
+              type     = click.File("wb"), 
               required = True, 
               help     = "Filename for the output (text CSV format)", )
 @click.option("-m", "--mass-range", 
