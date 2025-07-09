@@ -230,52 +230,35 @@ class HaloMassFunction( ABC ):
 ############################################################################################################
 #                                   LOAD FROM HALO MASS-FUNCTION TABLE                                     #
 ############################################################################################################
- 
-@dataclass(init = False, frozen = True, repr = False)
-class MassFunctionData(HaloMassFunction):
+
+def massFunctionFromData(name: str, data: _T) -> type[HaloMassFunction]:
     r"""
-    Halo mass-function loaded from pre-calculated data. This can be given as an array or the path to the 
-    text file containing the data (see ``data`` parameter). 
+    Create a subclass of ``HaloMassFunction`` to interpolate halo mass function values from a 
+    pre-calculated table.
 
     Parameters
     ----------
-    data : str, ndarray of shape (N, 2)
-        Mass-function table as an array or path to the file containing the table. This should have two 
-        columns - natural log of halo mass (Msun) and natural log of mass-function dn/dm (Mpc^-3).  
-    
-    psmodel : PowerSpectrum
-        Matter power spectrum object. This is used for accessing the cosmology model as well as calculating
-        the denisty variance values. It should be configured to the same redshift.
-        
-    redshift : float
-        Redshift at which the mass-function is evaluated. This value must be greater than -1.
+    name : str
+        Name of the mass-function model. This will be used to name the class, so it should not 
+        contain any illegal characters.
 
-    Delta : float, default=200
-        Halo over-density w.r.to the mean matter density. 
+    data : array_like of shape (N, 2)
+        Halo mass function data. This should contain at least 2 columns - log of the halo mass in 
+        Msun (first) and log of the mass-function in `dndm` format in Mpc^-3. Any other columns will
+        be ignored.
 
-    **loaderargs : optional
-        Other keyword arguments are passed to ``numpy.loadtxt`` for loading the data from file.
-
+    Returns
+    -------
+    cls : subclass of ``HaloMassFunction``
+      
     """
-    data: CubicSpline
-    id: str 
 
-    def __init__(
-            self, 
-            data    : NDArray[np.float64], 
-            psmodel : PowerSpectrum,
-            redshift: float,
-            Delta   : int = 200,
-        ) -> None:
-        # ``data`` array should contain the natural log of halo mass (Msun) and natural log of 
-        # mass-function dn/dm (Mpc^-3) as the first two columns.
-        data = np.asarray(data)
-        assert data.ndim == 2 and data.shape[1] >= 2
-        x, y = data[:, 0], data[:, 1]    
-        object.__setattr__(self, "data", CubicSpline(x, y)  )
-        object.__setattr__(self, "id"  , f"data{ id(data) }")
-        return super().__init__(psmodel = psmodel, redshift = redshift, Delta = Delta)
-    
+    data = np.array(data)
+    assert data.ndim == 2 and data.shape[1] >= 2
+
+    table   = CubicSpline( x = data[:, 0], y = data[:, 1] ) # interpolated data
+    clsname = f"HaloMassFunction{ name.capitalize() }" # name of the class
+
     def massFunction(
             self, 
             lnm: _T, 
@@ -287,9 +270,9 @@ class MassFunctionData(HaloMassFunction):
         lnm = np.asarray(lnm, dtype = np.float64)
         
         # Set the value outside the data range to 0;
-        validrange         = np.logical_not( ( lnm < self.data.x[ 0] ) | ( lnm > self.data.x[-1] ) )
+        validrange         = np.logical_not( ( lnm < self._data.x[ 0] ) | ( lnm > self._data.x[-1] ) )
         retval             = np.zeros_like(lnm)
-        retval[validrange] = np.exp( self.data(lnm[validrange]) )
+        retval[validrange] = np.exp( self._data(lnm[validrange]) )
 
         if return_value == "fs":
             # Calculate ``f(s)``, given mass and dn/dm.
@@ -312,6 +295,15 @@ class MassFunctionData(HaloMassFunction):
         lnm  = self._sigtable.solve(s)
         return self.massFunction(lnm, return_value = "fs") 
 
+    _dict    = {
+        "id"    : name,
+        "_data" : table,
+        "massFunction": massFunction, 
+        "fsigma"      : fsigma,
+    }
+    
+    return type(clsname, ( HaloMassFunction, ), _dict, )
+ 
 ############################################################################################################
 #                                   SOME HALO MASS-FUNCTION MODELS!...                                     #
 ############################################################################################################

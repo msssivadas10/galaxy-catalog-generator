@@ -8,8 +8,8 @@ from scipy.special import erf
 from typing import TypeVar, Literal
 from dataclasses import dataclass, field
 from astropy.cosmology import FLRW
-from .powerspectrum import PowerSpectrum, availableModels as powerspectrum_models
-from .halomassfunction import HaloMassFunction, MassFunctionData, availableModels as massfunction_models
+from .powerspectrum import PowerSpectrum
+from .halomassfunction import HaloMassFunction
 
 _T = TypeVar('_T')
 
@@ -166,20 +166,30 @@ class HaloModel:
         mf_loaderargs = mf_loaderargs or {}
         meta          = meta          or {}
         
-        assert psmodel in powerspectrum_models, f"unknown power spectrum model: {psmodel}"
-        powerspecObject = powerspectrum_models.get(psmodel)(
+
+        # Creating matter power spectrum object:
+        from .powerspectrum import availableModels as psmodels
+
+        assert psmodel in psmodels, f"unknown power spectrum model: {psmodel}"
+        powerspecObject = psmodels[ psmodel ](
             cosmo, 
             redshift = redshift, 
             ns       = ns, 
             sigma8   = sigma8, 
         )
         
-        args = dict(psmodel = powerspecObject, redshift = redshift, Delta = Delta)
+        # Creating mass-function object:
+        from .halomassfunction import availableModels as mfmodels
+        
         if isinstance(mfmodel, str):
-            assert mfmodel in massfunction_models, f"mass-function model {mfmodel!r} not available"
-            massfuncObject = massfunction_models.get(mfmodel)(**args) # pre-defined model
-        else:
-            massfuncObject = MassFunctionData(mfmodel, **args) # pre-calculated data
+            if mfmodel not in mfmodels:
+                raise TypeError(f"mass-function model {mfmodel!r} not available")
+            mfmodel = mfmodels[ mfmodel ]
+        massfuncObject = mfmodel(
+            psmodel  = powerspecObject, 
+            redshift = redshift, 
+            Delta    = Delta, 
+        ) 
 
         self = HaloModel(
             Mmin      = Mmin,
