@@ -3,12 +3,11 @@
 # CLI tools to process abacus halo catalogs and generate data.
 # 
 
-__version__ = "0.2a"
+__version__ = "0.2b"
 
 import os, os.path, glob, re, click, logging, asdf, yaml, numpy as np
 from typing import IO, Literal, Any
 from numpy.typing import NDArray
-from astropy.cosmology import w0waCDM
 from abacusnbody.data.compaso_halo_catalog import CompaSOHaloCatalog
 from galaxy_catalog_generator.halomodel import HaloModel
 from galaxy_catalog_generator.misc.correlation import PairCountData
@@ -73,153 +72,141 @@ def listCatalogs(simname: str, redshift: float, search_paths: list[str] = []) ->
 
     return files
 
-def loadCatalog(fn: str) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
+catarray = np.dtype([("id", np.uint64), ("pos", np.float64, [3]), ("mass", np.float64)])
+
+def loadCatalog(fn: str | list[str], Nrange: tuple[float, float] = None) -> NDArray[np.void]:
     r"""
     Load data from a abacus halo catalog file. Halo ID, position in Mpc and mass in Msun are returned.
     """
 
     logger = logging.getLogger()
-    
+
+    if isinstance(fn, (list, tuple)):
+        # Load data from multiple files. (NOTE: loading a large data may cause memory issues...)
+        return np.hstack([ loadCatalog(_fn, Nrange) for _fn in fn ])
+
+    # Load data from a single file
     logger.info(f"loading halo catalog from file: {fn!r}")
     catalog = CompaSOHaloCatalog(fn, cleaned = False, fields = ["id", "SO_central_particle", "N"])
-    
-    # Halo position coordinates in Mpc units
-    hubble       = 0.01 * catalog.header["H0"]
-    haloPosition = np.array( catalog.halos["SO_central_particle"] ) / hubble
+
+    # Halo integer id
+    haloID = np.array( catalog.halos["id"] )
+    data   = np.zeros(shape = len(haloID), dtype = catarray)
+    data["id"] = haloID
 
     # Halo mass in Msun
     unitMass = catalog.header["ParticleMassMsun"]
-    haloMass = np.array( catalog.halos["N"] ) * unitMass
+    data["mass"] = np.array( catalog.halos["N"] ) * unitMass
     
-    # Halo integer id
-    haloID = np.array( catalog.halos["id"] )
+    # Halo position coordinates in Mpc units
+    hubble      = 0.01 * catalog.header["H0"]
+    data["pos"] = np.array( catalog.halos["SO_central_particle"] ) / hubble
     
-    return haloID, haloPosition, haloMass
+    # Filtering based on mass (optional)
+    if Nrange is not None:
+        logger.info(f"applying mass range {Nrange}...")
+        data = data[
+            ( data["mass"] >= Nrange[0] * unitMass ) & 
+            ( data["mass"] <= Nrange[1] * unitMass )
+        ]
 
-def loadCatalog1(files: list[str], Nrange: tuple[float, float] = (0., np.inf)) -> NDArray[np.float64]:
+    return data
+
+def loadMetadata(simname: str, redshift: float, return_hm : bool = True, **kwargs) -> tuple[dict, HaloModel]:
     r"""
-    Load data from a abacus halo catalog file. Halo position in Mpc/h and mass in Msun/h 
-    are returned. 
-    
-    This is different from ``loadCatalog``, since it loads data from all catalog files in a
-    simulation, with an option for filtering based on halo mass. If no mass range is provided, 
-    or the range is very large, the loaded data would also be large and may cause memory 
-    issues.  
+    Load a subset of the metadata corresponding to a simulation. Also initialise a halomodel object using 
+    the loaded data. Other specified keywords arguments are passed to the object constructor. 
     """
 
     logger = logging.getLogger()
-    
-    Nmin, Nmax = Nrange
-    retval     = []
-    for fn in files:
-        logger.info(f"loading halo catalog from file: {fn!r}, mass range: [{Nmin}, {Nmax}]")
-        catalog = CompaSOHaloCatalog(fn, cleaned = False, fields  = ["SO_central_particle", "N"])
-        
-        # Halo mass in Msun/h
-        unitMass = catalog.header["ParticleMassHMsun"]
-        haloMass = np.array( catalog.halos["N"] )
-
-        # -- Filtering based on mass
-        mask     = ( haloMass >= Nmin ) & ( haloMass <= Nmax )
-        haloMass = haloMass[mask] * unitMass
-        
-        # Halo position coordinates in Mpc/h units
-        haloPosition = np.array( catalog.halos["SO_central_particle"] )[mask, :]
-
-        retval.append( np.hstack([haloPosition, haloMass.reshape((-1, 1))]) )
-
-    return np.vstack(retval)
-
-def buildHaloModel(simname: str, redshift: float, **haloargs) -> HaloModel:
-    r"""
-    Initialize a halo model object using the cosmology parameters corresponding to the given abacus 
-    simulation details and halo model parameters.
-    """
-
-    logger = logging.getLogger()
+    logger.info(f"loading metatdata for simulation {simname!r}for redshift {redshift}...")
 
     import abacusnbody.metadata
+    meta = abacusnbody.metadata.get_meta(simname, redshift)
 
-    logger.info(f"loading metatdata for simulation {simname!r}for redshift {redshift}...")
-    tree = abacusnbody.metadata.get_meta(simname, redshift)
-    
+    # Filter the dict to contain only the selected fields
+    fields = [("SimName"          , "simname"          ), 
+              ("Redshift"         , "redshift"         ), 
+              ("H0"               , "H0"               ), 
+              ("Omega_M"          , "Om0"              ), 
+              ("Omega_DE"         , "Ode0"             ), 
+              ("omega_b"          , "Ob0"              ), 
+              ("w0"               , "w0"               ), 
+              ("wa"               , "wa"               ), 
+              ("n_s"              , "ns"               ), 
+              ("SODensity"        , "SODensity"        ), 
+              ("BoxSize"          , "boxsize"          ), 
+              ("ParticleMassHMsun", "particleMassHMsun"), 
+              ("BoxSizeMpc"       , "boxsizeMpc"       ), 
+              ("ParticleMassMsun" , "particleMassMsun" ),]
+    tree = { kn : meta[ko] for ko, kn in fields }
+
+    tree["Ob0"   ] = tree["Ob0" ] / ( 0.01*tree["H0"] )**2 # converting Obh2 to Ob0
+    tree["sigma8"] = sigma8Table[ re.search(r"c(\d{3})", simname).group(1) ] # sigma_8 parameter
+    tree["Tcmb0" ] = 2.728 # CMB temperature value 
+
+    if not return_hm:
+        return tree, None
+
+    # Creating the halo model object:
+    from astropy.cosmology import w0waCDM
+
+    # Matter power spectrum model
+    psmodel = kwargs.get( "psmodel", "eisenstein98_zb" )
+    tree["psmodel"] = psmodel
+
+    # Halo mass-function model
+    mfmodel = kwargs.get( "mfmodel", "tinker08" )
+    tree["mfmodel"] = mfmodel
+
+    mfFilePath = os.path.abspath(mfmodel)
+    if os.path.isfile(mfFilePath):
+        # Load mass function data from a file
+        logger.info(f"found mass-function data file {mfFilePath!r}")
+        
+        if re.match(r".+\.asdf$", mfmodel): 
+            # Data file is in ASDF format: mass-function data in a `data` section with fields 
+            # `ln_M` (i.e., ln(M), with mass M in Msun units) and `ln_dndM` (i.e, ln(dndM), with
+            # mass-function dndM in Mpc^-3 unit): 
+            with asdf.open(mfmodel) as af:
+                hmfdata = np.array([af["data"]["ln_M"   ], 
+                                    af["data"]["ln_dndM"]]).T
+        else:
+            # Data file is a plain text file, comma seperated, with first two columns identified 
+            # as the fields `ln_M` and `ln_dndM`: 
+            hmfdata = np.loadtxt(mfmodel, usecols = [0, 1], delimiter = ',', comments = '#')
+
+        from galaxy_catalog_generator.halomassfunction import massFunctionFromData
+        
+        logger.info("creating custom mass-function model from loaded data")
+        mfmodel         = massFunctionFromData("data", hmfdata)
+        mfmodel.id      = mfFilePath # change the model id to the file path 
+        tree["mfmodel"] = mfFilePath
+
     logger.info(f"creating halo model object...")
-    haloargs = {
-        "Mmin"     : None,
-        "sigmaM"   : 0.  ,
-        "M1"       : None,
-        "M0"       : None,
-        "alpha"    : 1.  ,
-        "scaleSHMF": 0.5 ,
-        "slopeSHMF": 2.  ,
-        **haloargs
-    }
-    for __key in [ "redshift", "cosmo", "ns", "sigma8", "Delta", "meta" ]: 
-        # These values are loaded from metadata...
-        _ = haloargs.pop( __key, None )
-    
+    cargs = ( "H0", "Om0", "Ode0", "Ob0" ,"w0", "wa", "Tcmb0" ) 
     model = HaloModel.create(
-        **haloargs,
-        redshift  = tree["Redshift"], 
-        cosmo     = w0waCDM(
-            H0    = tree["H0"      ], 
-            Om0   = tree["Omega_M" ], 
-            Ode0  = tree["Omega_DE"],
-            Ob0   = tree["omega_b" ] / ( 0.01*tree["H0"] )**2,
-            w0    = tree["w0"      ], 
-            wa    = tree["wa"      ], 
-            Tcmb0 = 2.728, # CMB temperature value if fixed as 2.728 K
-            name  = tree["SimName" ],
-        ), 
-        ns        = tree["n_s"], 
-        sigma8    = sigma8Table[ re.search(r"c(\d{3})", tree["SimName"]).group(1) ], 
+        Mmin      = kwargs.get( "Mmin"     , -1.  ),
+        M0        = kwargs.get( "M0"       , -1.  ),
+        M1        = kwargs.get( "M1"       , -1.  ),
+        sigmaM    = kwargs.get( "sigmaM"   ,  0.  ),
+        alpha     = kwargs.get( "alpha"    ,  2.  ),
+        scaleSHMF = kwargs.get( "scaleSHMF",  0.5 ),
+        slopeSHMF = kwargs.get( "slopeSHMF",  2.  ),
+        redshift  = tree["redshift"],
+        cosmo     = w0waCDM( name = tree["simname" ], **{ k : tree[k] for k in cargs } ), 
+        psmodel   = psmodel,
+        mfmodel   = mfmodel,
+        ns        = tree["ns"],
+        sigma8    = tree["sigma8"],
         Delta     = tree["SODensity"][0],
-        meta      = {},
+        meta      = None
     )
 
-    # Save a few other values from the simulation metadata. Only the values of ``simname`` and 
-    # ``redshift`` are enough, beacuse using them one can get the full metadata using the package
-    # ``abacusnbody.metadata``. 
-    keymapping = { 
-        "boxsize"     : "BoxSize"   , "particleMass"    : "ParticleMassHMsun", 
-        "boxsizeMpc"  : "BoxSizeMpc", "particleMassMsun": "ParticleMassMsun" , 
-    }
-    model.meta.update({ altkey: tree[key] for altkey, key in keymapping.items() })  
-    return model
+    attrs = [ "Mmin", "sigmaM", "M0", "M1", "alpha", "scaleSHMF", "slopeSHMF", ] # HOD parameters
+    tree.update({ attr: getattr(model, attr) for attr in attrs })
 
-def halomodelDict(model: HaloModel, include_meta: bool = True) -> dict[str, Any]:
-    r"""
-    Convert a halo model object into a mapping, ready to be serialized as YAML/JSON. 
-    """
-
-    cosmo = model.cosmo
-    tree  = {
-        "Mmin"     : model.Mmin, 
-        "M0"       : model.M0, 
-        "M1"       : model.M1, 
-        "sigmaM"   : model.sigmaM, 
-        "alpha"    : model.alpha,
-        "scaleSHMF": model.scaleSHMF, 
-        "slopeSHMF": model.slopeSHMF, 
-        "Delta"    : model.Delta, 
-        "ns"       : model.psmodel.ns,
-        "sigma8"   : model.psmodel.sigma8,
-        "H0"       : np.array(cosmo.H0).tolist(), 
-        "Om0"      : cosmo.Om0, 
-        "Ode0"     : cosmo.Ode0, 
-        "Ob0"      : cosmo.Ob0, 
-        "w0"       : cosmo.w0, 
-        "wa"       : cosmo.wa, 
-        "Tcmb0"    : np.array(cosmo.Tcmb0).tolist(),
-        "simname"  : cosmo.name,
-        "redshift" : model.redshift,
-        "psmodel"  : model.psmodel.id,
-        "mfmodel"  : model.mfmodel.id
-    }
-    if include_meta: 
-        tree.update(model.meta)
-
-    return tree
+    return tree, model
 
 ############################################################################################################
 #                                       ARGUMENT VALIDATOR FUNCTIONS                                       #
@@ -357,53 +344,40 @@ def massfunc(
     if not files: return 
 
     # Loading particle mass and boxsize from the metadata:
-    # NOTE: Halo model object is not needed for calculations, but created to get the simulation 
-    # parameters, which will be written as the comments in the output file... 
-    tree     = halomodelDict( model = buildHaloModel(simname, redshift) )
+    tree, _  = loadMetadata(simname, redshift, return_hm = False)
+    tree.update({ "Nrange" : mass_range, "nbins" : nbins })
     unitMass = tree["particleMassMsun"] 
     boxsize  = tree["boxsizeMpc"]
 
     # Estimating halo mass-function
     massBinEdges = unitMass * np.logspace( np.log10(mass_range[0]), np.log10(mass_range[1]), nbins+1 ) 
-    massFunc     = np.zeros(shape = massBinEdges.shape[0]-1)
+    haloCount    = np.zeros(shape = massBinEdges.shape[0]-1)
     for file in files:
-        _, _, haloMass = loadCatalog(file) # halo mass in Msun 
-        massFunc[:]   += np.histogram(haloMass, bins = massBinEdges)[0][:]
+        data = loadCatalog(file) # halo mass in Msun 
+        haloCount[:]  += np.histogram(data["mass"], bins = massBinEdges)[0][:]
     
-    dlnMassH  = np.diff( np.log( massBinEdges ) )
-    massH     = np.sqrt( massBinEdges[1:] * massBinEdges[:-1] )
-    massFunc /= ( boxsize**3 * massH * dlnMassH ) # dn/dm in Mpc^-3
+    dlnMassH = np.log( massBinEdges[1] ) - np.log( massBinEdges[0] ) 
+    massH    = np.sqrt( massBinEdges[1:] * massBinEdges[:-1] )
 
-    nonzeroMask       = massFunc > 0.
-    massFunctionTable = np.log( np.stack(( massH[nonzeroMask], massFunc[nonzeroMask] ), axis = -1) )
+    # Filtering non zero values
+    nonzeroMask  = np.argwhere(haloCount > 0.).flatten()
+    massH, haloCount = massH[nonzeroMask], haloCount[nonzeroMask]
+
+    massFunc    = haloCount / ( boxsize**3 * massH * dlnMassH ) # dn/dm in Mpc^-3
+    massFuncErr = np.sqrt(haloCount) / haloCount # relative error assuming poisson noise
      
-    # Save data as plain text CSV format
+    # Save data as asdf file
     logger.info(f"saving data to file: {output_file.name!r}")
-    with output_file:
+    with asdf.AsdfFile({
+            "header" : tree, 
+            "data"   : {
+                "ln_M"     : np.log(massH),
+                "ln_dndM"  : np.log(massFunc),
+                "relError" : massFuncErr,
+            }
+        }) as af:
+        af.write_to(output_file)
 
-        # Header string (comment) contains simulation parameters for quick reference...
-        import json
-        header = json.dumps({
-                "data": {
-                    "ln_mass" : { "unit": "Msun", "size": np.size(massFunctionTable, 0) }, 
-                    "ln_dndm" : { "unit": "Mpc3", "size": np.size(massFunctionTable, 1) }
-                }, 
-                "header": { 
-                    _key: tree[ _key ] for _key in ["simname", "redshift", "particleMass", "boxsize", 
-                                                    "H0", "Om0", "Ode0", "Ob0", "w0", "wa", "ns", 
-                                                    "sigma8", "Tcmb0", "Delta", ] 
-                }
-            }, 
-            sort_keys = False,
-        )
-
-        np.savetxt(
-            output_file, 
-            massFunctionTable, 
-            delimiter = ',',
-            comments  = '#', 
-            header    = header,
-        )
     return
 
 @cli.command
@@ -492,12 +466,9 @@ def halomod(
 
     # Creating the halo model object 
     simname, redshift = siminfo
-    model = buildHaloModel(
+    tree, model = loadMetadata(
         simname, 
         redshift, 
-        Mmin      = None, 
-        M1        = None, 
-        M0        = None, 
         sigmaM    = sigma_m, 
         alpha     = alpha,
         scaleSHMF = scale_shmf, 
@@ -521,27 +492,26 @@ def halomod(
     logger.info(f"optimization exited at iteration {res.nit} with status={res.status} and message={res.message!r}")
     logger.info(f"optimization result: Mmin={res.Mmin:.4g} and M1={res.M1:.4g}")
     logger.info(f"optimum values: galaxy density={res.galaxy_density:.3g}, satellite fraction={res.satellite_fraction:.3g} (score={res.score:.3g})")
+    tree.update({ "Mmin": model.Mmin, "M0": model.M0, "M1": model.M1 })
 
     # Saving file
     logger.info(f"saving model to {output_file.name!r}...")
     with output_file:
         yaml.safe_dump(
             {
-                **halomodelDict(model, include_meta = 1), 
-                "Settings" : {
-                    "SimName"          : simname,
-                    "Redshift"         : redshift,
-                    "GalaxyDensity"    : galaxy_density, 
-                    "SatelliteFraction": satellite_fraction,
-                    "Mmin_Range"       : mmin_range, 
-                    "M1_Range"         : m1_range
+                **tree, 
+                "settings" : {
+                    "galaxyDensity"     : galaxy_density, 
+                    "satelliteFraction" : satellite_fraction,
+                    "Mmin_Range"        : mmin_range, 
+                    "M1_Range"          : m1_range
                 },
-                "OptimizationResult": {
-                    "OptGalaxyDensity"    : float(res.galaxy_density), 
-                    "OptSatelliteFraction": float(res.satellite_fraction),
-                    "OptScore"            : float(res.score),
-                    "Status"              : res.status, 
-                    "Message"             : res.message,
+                "optimizationResult": {
+                    "optGalaxyDensity"     : float(res.galaxy_density), 
+                    "optSatelliteFraction" : float(res.satellite_fraction),
+                    "optScore"             : float(res.score),
+                    "status"               : res.status, 
+                    "message"              : res.message,
                 },
             }, 
             stream    = output_file, 
@@ -595,22 +565,22 @@ def galaxies(
     if not files: return
 
     # Create the halo model object by loading the parameters from the given file
-    haloargs = yaml.safe_load(halomodel)
+    with halomodel:
+        haloargs = yaml.safe_load(halomodel)
     if not isinstance(haloargs, dict):
         return logger.error(f"cannot load halo model parameters from file {halomodel.name!r}")
     # This file can also contain cosmology model parameters. But, values taken from the simulation
     # metadata are used for consistency. NOTE: Make sure that the model parameters match the cosmology 
     # and redshift of the simulation. 
     haloargs  = { 
-        key: haloargs[key] for key in haloargs
-                            if key in  [
-                                "Mmin", "M1", "M0", "sigmaM", "alpha", "scaleSHMF", "slopeSHMF", 
-                                "psmodel", "mfmodel"
-                            ]
+        key: haloargs[key] for key in [
+            "Mmin", "M1", "M0", "sigmaM", "alpha", "scaleSHMF", "slopeSHMF", 
+            "psmodel", "mfmodel"
+        ]
     }
 
     try:
-        model = buildHaloModel(simname, redshift, **haloargs)
+        tree, model = loadMetadata(simname, redshift, **haloargs)
     except Exception as e:
         return logger.error(f"error in creating halo model: {e}")
     
@@ -618,16 +588,14 @@ def galaxies(
     output_path = os.path.join(output_path, simname, f"z{redshift:.3f}", "galaxy_info")
     os.makedirs(output_path, exist_ok = True)
 
-    # Header: contains the values of cosmology and simulation parameters
-    header = halomodelDict(model, include_meta = True)
-        
     # Generate galaxy catalog for halos in each file
     filePattern = re.compile(r"halo_info_(\d+).asdf") # for files like `halo_info_123.asdf`
     for file in files:
 
         # Loading halo data
         # NOTE: position coordinates are in Mpc and mass are in Msun unit 
-        haloID, haloPosition, haloMass = loadCatalog(file)
+        data = loadCatalog(file)
+        haloID, haloPosition, haloMass = data["id"], data["pos"], data["mass"]
         
         # Placing central and satellite galaxies in each halo randomly, based on the halo model.
         # NOTE: This is done in loop - slow for large catalogs 
@@ -650,6 +618,7 @@ def galaxies(
         logger.info(f"placed galaxies in {cgalaxyPerFile} out of {halosPerFile} halos ({galaxyPercentage:.3f}%)")
 
         # NOTE: position and mass are saved in Mpc/h and Msun/h units, respectrively.
+        # TODO: save in Mpc and Msun
         parentHaloID    = np.hstack(parentHaloID)
         galaxyPositions = np.vstack(galaxyPositions) * model.cosmo.h # galaxy position in Mpc/h
         galaxyMass      = np.hstack(galaxyMass)      * model.cosmo.h # galaxy mass in Msun/h
@@ -657,7 +626,7 @@ def galaxies(
         
         # Wrapping around the coordinates that falls outside the simulation boxsize, with a 
         # periodic boundary condition, as in the original simulation...
-        boxsize = model.meta["boxsize"] # in Mpc/h
+        boxsize = tree["boxsize"] # in Mpc/h
         galaxyPositions = ( galaxyPositions + 0.5*boxsize ) % boxsize - 0.5*boxsize # in Mpc/h
 
         # Saving the catalog to a file in output path. File index is same as the halo file index
@@ -666,22 +635,21 @@ def galaxies(
             f"galaxy_info_{ filePattern.match(os.path.basename(file)).group(1) }.asdf", 
         )
         logger.info(f"saving catalog to file: {outputFile!r}") 
-        af = asdf.AsdfFile({
-            "header"    : {
-                **header, 
-                "halosProcessed"   : halosPerFile, 
-                "centralGalaxies"  : cgalaxyPerFile, 
-                "satelliteGalaxies": sgalaxyPerFile,
-            }, 
-            "data"      : {
-                "parentHaloID"  : parentHaloID, 
-                "galaxyPosition": galaxyPositions, 
-                "galaxyMass"    : galaxyMass, 
-                "galaxyType"    : galaxyType,
-            }
-        })
-        af.write_to(outputFile, all_array_compression = 'zlib')
-        af.close()
+        with asdf.AsdfFile({
+                "header" : {
+                    **tree, 
+                    "halosProcessed"    : halosPerFile, 
+                    "centralGalaxies"   : cgalaxyPerFile, 
+                    "satelliteGalaxies" : sgalaxyPerFile,
+                }, 
+                "data" : {
+                    "parentHaloID"   : parentHaloID, 
+                    "galaxyPosition" : galaxyPositions, 
+                    "galaxyMass"     : galaxyMass, 
+                    "galaxyType"     : galaxyType,
+                }
+            }) as af:
+            af.write_to(outputFile, all_array_compression = 'zlib')
         
     logger.info("galaxy catalog generation completed! :)")
     return
@@ -753,61 +721,54 @@ def corrfunc(
     simname, redshift = siminfo
     files = listCatalogs(simname, redshift, path)
     if not files: return 
+    
+    tree, _ = loadMetadata(simname, redshift, return_hm = False)
+    hubble  = tree["H0"] / 100.
 
     # Loading catalogs: if the ranges are same, auto correlation is calculated and single
     # catalog is needed 
     autocorr = np.allclose(mrange1, mrange2)
-    D1 = loadCatalog1(files, Nrange = mrange1)
-    D2 = loadCatalog1(files, Nrange = mrange2) if not autocorr else None
-
-    import abacusnbody.metadata
-    tree = abacusnbody.metadata.get_meta(simname, redshift)
+    D1 = loadCatalog(files, Nrange = mrange1)["pos"]
+    D2 = loadCatalog(files, Nrange = mrange2)["pos"] if not autocorr else None
 
     # Calculating correlation function
     estimator = estimator.lower()
-    rBinEdges = np.logspace( np.log10(rrange[0]), np.log10(rrange[1]), rbins+1 )
+    rBinEdges = np.logspace( np.log10(rrange[0]), np.log10(rrange[1]), rbins+1 ) # in Mpc/h
     rCenter   = np.sqrt( rBinEdges[1:] * rBinEdges[:-1] ) 
     countData = PairCountData.countPairs(
         D1, 
         D2, 
-        rBinEdges, 
-        boxsize  = tree["BoxSize"], 
+        rBinEdges / hubble, # in Mpc
+        boxsize  = tree["boxsizeMpc"], 
         periodic = True, 
         diff_r   = False, 
         nthreads = nthreads or os.cpu_count(),
     )
     xi, xiError = countData.correlation(estimator)
+    tree.update({
+        "NRange1"   : list( mrange1 ), 
+        "NRange2"   : list( mrange2 ), 
+        "sizeD1"    : countData.ND1, 
+        "sizeD2"    : countData.ND2,
+        "sizeR"     : countData.NR1,
+        "estimator" : estimator,  
+    })
 
     # Saving the output file:
     logger.info(f"saving correlation values to file {output_file.name!r}")
-    af = asdf.AsdfFile({
-        "header" : {
-            k: tree[k] for k in [ 
-                "SimName", "Redshift", "H0", "Omega_M", "Omega_DE", "omega_b", 
-                "w0", "wa", "n_s", "SODensity", "BoxSize", "ParticleMassHMsun", 
-                "BoxSizeMpc", "ParticleMassMsun",
-            ]
-        } | {
-            "sigma8"       : sigma8Table[ re.search(r"c(\d{3})", tree["SimName"]).group(1) ], 
-            "NRange1"      : list( mrange1 ), 
-            "NRange2"      : list( mrange2 ), 
-            "CatalogSize1" : countData.ND1, 
-            "CatalogSize2" : countData.ND2,
-            "RandomSize"   : countData.NR1,
-            "Estimator"    : estimator,  
-        }, 
-        "data" : {
-            "r"     : rCenter, 
-            "xi"    : xi,
-            "xiErr" : xiError,
-            "D1D2"  : countData.D1D2, 
-            "D1R2"  : countData.D1R2,
-            "D2R1"  : countData.D2R1,
-            "R1R2"  : countData.R1R2, 
-        }
-    })
-    af.write_to(output_file, all_array_compression = "zlib")
-    af.close()
+    with asdf.AsdfFile({
+            "header" : tree, 
+            "data"   : {
+                "r"     : rCenter, 
+                "xi"    : xi,
+                "xiErr" : xiError,
+                "D1D2"  : countData.D1D2, 
+                "D1R2"  : countData.D1R2,
+                "D2R1"  : countData.D2R1,
+                "R1R2"  : countData.R1R2, 
+            }
+        }) as af:
+        af.write_to(output_file, all_array_compression = "zlib")
 
     logger.info("correlation calculation completed!...")
     return
