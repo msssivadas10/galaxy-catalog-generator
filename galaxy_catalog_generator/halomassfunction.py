@@ -258,37 +258,22 @@ class MassFunctionData(HaloMassFunction):
 
     """
     data: CubicSpline
-    file: str = ""
-
-    # Here, the filename is the id (useful when data is loaded from file, but not very useful if the
-    # object is created by direcly using an array of values!)
-    @property 
-    def id(self) -> str: return self.file  
+    id: str 
 
     def __init__(
             self, 
-            data    : str | NDArray[np.float64], 
+            data    : NDArray[np.float64], 
             psmodel : PowerSpectrum,
             redshift: float,
             Delta   : int = 200,
-            **loaderargs,
         ) -> None:
-
-        if isinstance(data, str):
-            loaderargs = { "unpack": True, "delimiter": ',', "comments": '#' } | loaderargs
-            loaderargs["unpack"] = True
-            
-            # ``data`` is the path to the file storing the mass-function data. This file should contain the
-            # natural log of halo mass (Msun) and natural log of mass-function dn/dm (Mpc^-3) as the only 
-            # two columns.   
-            lnM, lndndM = np.loadtxt(data, **loaderargs)
-            object.__setattr__(self, "file", data)
-        else:
-            # ``data`` is an array of values in the same format as loaded from the file...
-            lnM, lndndM = np.transpose(data)
-
-        object.__setattr__(self, "data", CubicSpline(lnM, lndndM))
-
+        # ``data`` array should contain the natural log of halo mass (Msun) and natural log of 
+        # mass-function dn/dm (Mpc^-3) as the first two columns.
+        data = np.asarray(data)
+        assert data.ndim == 2 and data.shape[1] >= 2
+        x, y = data[:, 0], data[:, 1]    
+        object.__setattr__(self, "data", CubicSpline(x, y)  )
+        object.__setattr__(self, "id"  , f"data{ id(data) }")
         return super().__init__(psmodel = psmodel, redshift = redshift, Delta = Delta)
     
     def massFunction(

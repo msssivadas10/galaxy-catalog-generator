@@ -174,22 +174,12 @@ class HaloModel:
             sigma8   = sigma8, 
         )
         
-        if mfmodel in massfunction_models:
-            # Create a mass-function object of this pre-defined model:
-            massfuncObject = massfunction_models.get(mfmodel)(
-                psmodel  = powerspecObject, 
-                redshift = redshift, 
-                Delta    = Delta, 
-            )
+        args = dict(psmodel = powerspecObject, redshift = redshift, Delta = Delta)
+        if isinstance(mfmodel, str):
+            assert mfmodel in massfunction_models, f"mass-function model {mfmodel!r} not available"
+            massfuncObject = massfunction_models.get(mfmodel)(**args) # pre-defined model
         else:
-            # This may be the filename containg the pre-calculated data or data...
-            massfuncObject = MassFunctionData(
-                mfmodel, 
-                psmodel  = powerspecObject, 
-                redshift = redshift, 
-                Delta    = Delta, 
-                **mf_loaderargs
-            )
+            massfuncObject = MassFunctionData(mfmodel, **args) # pre-calculated data
 
         self = HaloModel(
             Mmin      = Mmin,
