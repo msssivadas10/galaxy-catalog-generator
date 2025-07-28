@@ -3,7 +3,7 @@
 
 __version__ = "0.1a"
 
-import os.path, glob, logging, click, numpy as np, asdf
+import os, os.path, glob, logging, click, numpy as np, asdf
 from typing import IO, Literal
 
 @click.group
