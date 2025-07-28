@@ -94,6 +94,7 @@ def savecat(
         header["halosProcessed"]    = -1 # not needed - only for compatibility
         header["centralGalaxies"]   =  0
         header["satelliteGalaxies"] =  0
+    header.update({ "NRange": list(mrange) })
 
     totalCount = 0
     ma, mb     = np.array(mrange) * header["particleMass"] # in Msun/h
@@ -197,14 +198,16 @@ def galaxycorr(
 
     logger.info(f"loading catalog 1, {cat1.name!r}")
     with asdf.open(cat1) as af:
-        tree = af["header"] 
+        tree    = af["header"] 
+        mrange1 = af["header"]["NRange"]
         D1 = af["data"]["galaxyPosition"].copy()
         T1 = af["data"]["galaxyType"].copy()
 
-    D2, T2 = None, None
+    D2, T2, mrange2 = None, None, mrange1
     if cat2 is not None:
         logger.info(f"loading catalog 2, {cat2.name!r}")
         with asdf.open(cat2) as af: 
+            mrange2 = af["header"]["NRange"]
             D2 = af["data"]["galaxyPosition"].copy()
             T2 = af["data"]["galaxyType"].copy()
 
@@ -228,6 +231,8 @@ def galaxycorr(
     )
     xi, xiError = countData.correlation(estimator)
     tree.update({
+        "NRange1"   : list( mrange1 ), 
+        "NRange2"   : list( mrange2 ),
         "sizeD1"    : countData.ND1, 
         "sizeD2"    : countData.ND2,
         "sizeR"     : countData.NR1,
