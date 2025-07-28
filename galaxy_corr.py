@@ -58,7 +58,7 @@ def cli() -> None:
 
 @cli.command
 @click.option("--path", 
-              type     = click.Path(file_okay = True, resolve_path = True, ), 
+              type     = click.Path(), 
               required = True, 
               help     = "Path to the directory containing galaxy catalog files", )
 @click.option("--mrange", 
