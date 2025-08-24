@@ -1,93 +1,83 @@
 # Galaxy Catalog Generator
 
-A simple galaxy catalog generator based on a 5 or 3-parameter halo occupation 
-distribution (HOD) model. This model uses a smooth step function for modelling 
-the average number of central galaxies in a halo of mass $M$, 
+Tools for theoretical calculations related to darkmatter halos.
 
-$$
-    N_{\rm cen}(M) = 0.5 \left[ 
-            1 + {\rm erf}\left( 
-                \frac{ \ln M - \ln M_{\rm min}}{ \sigma_M } 
-        \right) 
-    \right]
-$$
+# ``abacus_halos`` CLI Tool
 
-For $\sigma_M = 0$, this becomes the usual step function. Average satellite count 
-is given as a power law 
+This CLI tool provides a set of commands for estimating halo mass-function and 
+generating galaxy catalogs from halo catalogs of the abacus simulation.
 
-$$
-    N_{\rm sat} = \left( \frac{ M - M_0}{ M_1 } \right)^\alpha 
-$$
 
-Mass distribution of the satellite galaxies is given by the subhalo mass-function, 
-which is taken as a bounded Pareto distribution
+## The ``massfunc`` command
 
-$$
-    n(m | M) \propto \left( \frac{m}{\beta M} \right)^{-\gamma} 
-$$
+This can be used to estimate halo mass-function from an abacus halo catalog. 
+Estimated values will be saved as a CSV table of halo mass ($M_\odot$) and 
+mass-function $dn/dm$ ($\rm Mpc^{-3}$). Both values are in natural log format.
 
-where the scale parameter $\beta$ specify the maximum mass of the satellite galaxy 
-and $\gamma$ is the logarithmic slope of the function. Usually $\beta=0.5$ and $\gamma=2$ are used.   
+### Options:
+Option              | Description
+--------------------|-----------------------------------------------------------------------
+``--siminfo``       | A tuple of a valid abacus simulation name and redshift value (**required**)
+``--output-file``   | Filename for the output (**required**)
+``--mass-range``    | Values of the left- and right-most mass bins in particle mass unit
+``--nbins``         | Number of bins. Must be greater than 2.
+``-p``, ``--path``  | Paths to look for simulation catalog files
 
-## Using `abacus_galaxies.py`
 
-To generate galaxy catalogs from abacus halo catalogs, create a parameter file 
-containing the halo model parameters and other settings in a valid YAML format. 
-Then run the script as
+## The ``halomod`` command
 
-```sh
-$ python3 abacus_galaxies.py parameter_file.yml
-```
+This tool can be used to calculate the optimum values for halo model, based on 
+observed values of galaxy density (in $\rm Mpc^{-3}$) and satellite  fraction. 
+Other model parameters, including cosmology, are selected corresponding to the 
+given abacus simulation details. The output will be saved in YAML format.
 
-Required fields in the parameter file are 
+### Options:
+Option                               | Description
+-------------------------------------|-----------------------------------------------------------------------
+``--siminfo``                        | A tuple of a valid abacus simulation name and redshift value  (**required**)
+``--galaxy-density``, ``--ngal``     | Observed value of the galaxy number density in Mpc^-3  (**required**)
+``--satellite-fraction``, ``--fsat`` | Observed value of the satellite galaxy fraction  (**required**)
+``--output-file``                    | Filename for the output (**required**)
+``--sigma-m``                        | Transition width for central galaxy count function 
+``--alpha``                          | Index for the power law satellite count function  
+``--scale-shmf``                     | Scale for the SHMF - specify the maximum mass of a subhalo, as a fraction of halo
+``--slope-shmf``                     | Slope for the SHMF
+``--powerspectrum``, ``--mps``       | Matter power spectrum model used for calculations
+``--massfunction``, ``--hmf``        | Halo mass-function model used for calculations or path to the data file
+``--mmin-range``                     | Search range for parameter Mmin (or M0) in Msun units
+``--m1-range``                       | Search range for parameter M1 in Msun units
+``--gridsize``                       | Size of the Mmin-M1 grid used to guess minimum 
 
-+ ``Mmin``: Specify the minimum halo mass (in Msun) required to host a galaxy
-+ ``sigmaM``: Transition width for central galaxy count relation. 0 value 
-    is results in a step function.  
-+ ``M0``: Minimum mass (in Msun) for having non-zero satellites. It can be taken
-    the same as ``Mmin``.
-+ ``M1``: Amplitude of the satellite count function.
-+ ``alpha``: Slope of the satellite count function. Usually 1. 
-+ ``scaleSHMF``: Specify the maximum satellite mass as fraction of halo mass. 
-+ ``slopeSHMF``: Slope of the sub-halo mass-function power law.
-+ ``catpath``: Path to the halo catalogs. 
-+ ``outpath``: Path to the output location to save.
-+ ``powerspec``: Power spectrum model to use (default is ``eisenstein98_zb``)
-+ ``massfunc``: Halo mass-function model to use (default is ``tinker08``)
 
-To match with observation, ``Mmin`` and ``M1`` are calculated so that the galaxy 
-density and satellite fraction values calculated using these values matches with 
-the observed values. To do this ``hod_optimizer.py`` script can be used as
+## The ``galaxies`` command
 
-```sh
-$ python3 hod_optmizer.py --OPTION1=VALUE1 --OPTION2=VALUE2 ...
-```
+This tool can be  used to generate a galaxy catalog using the specified abacus halo 
+catalog and halo model parameters.  
 
-Important options are:
+**Note**: Always make sure that the halo model parameters match the cosmology setup of 
+the simulation used and observation for more realistic results.
 
-+ ``simname``: Name of the abacus simulation (to get cosmology parameters).
-+ ``redshift``: Redshift of the catalog.
-+ ``galdens``: Observed value of galaxy density in ${\rm Mpc}^{-3}$.
-+ ``satfrac``: Observed value of satellite fraction.
+### Options:
+Option             | Description
+-------------------|-----------------------------------------------------------------------
+``--siminfo``      | A tuple of a valid abacus simulation name and redshift value (**required**)
+``--halomodel``    | Path to the file which store the halo model parameters in YAML format (**required**)
+``--output-path``  | Path to the directory to save galaxy catalog files (**required**)
+``-p``, ``--path`` | Paths to look for simulation catalog files
 
-Other parameters are ``sigma`` (same as ``sigmaM``), ``alpha``, ``powerspec`` and 
-``massfunc``. Running this will print the calculated optimum parameters to the 
-stdout in a YAML compatible format. This can be copied to the parameter file for 
-using with the catalog generator. Also, the values are saved as the ASDF file 
-``hod_optimizer_result.asdf``.
 
-## Using the catalog
+### Using the catalog
 
 Galaxy catalogs generated are saved as ASDF files to specified location. These 
-files will have a ``header`` section containing the parameter values and a 
-``data`` section containing the catalog data. This table has fields
+files will have two sections 
 
-+ ``parentHaloID``: an ``int64`` ID for the parent halo in the halo catalog. 
-+ ``galaxyPosition``: galaxy position coordinates in ${\rm Mpc}/h$ units, as 
-    ``float64[3]`` vector.
-+ ``galaxyMass``: galaxy mass in $M_\odot/h$ units, as ``float64``. 
-+ ``galaxyType``: a ``uint8`` value indicating the type of the galaxy. Central 
-    galaxy have value `1` and satellites have `2`.
++ A ``header`` section containing the parameter values used in simulation, and 
 
-Another ``statistics`` field in the file store the number of halos uesd, central 
-and satellite galaxies in the file, which may be useful later. 
++ A ``data`` section containing the catalog data. This table has fields
+
+Attribute           | Type           | Description 
+--------------------|----------------|-------------------------------------------
+``parentHaloID``    | ``int64``      | ID for the parent halo in the halo catalog
+``galaxyPosition``  | ``float64[3]`` | Position coordinates in ${\rm Mpc}/h$
+``galaxyMass``      | ``float64``    | Mass in $M_\odot/h$   
+``galaxyType``      | ``uint8``      | Galaxy type (`1`: central, `2`: satellite)      
