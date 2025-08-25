@@ -6,11 +6,11 @@ module growthfactor
     use quadutils
     implicit none
 
-    private :: integrand
+    private :: integrand, growth_ode
 
     type, public, bind(c) :: lgargs_t
-    !! A struct containing values of various arguments for growth factor 
-    !! calculation routines.
+        !! A struct containing values of various arguments for growth 
+        !! factor calculation routines.
         
         real(c_double) :: Om0 
         !! Total matter density parameter
@@ -121,5 +121,90 @@ contains
         end if
         
     end function linear_growth
+
+    subroutine growth_ode(args, a, y)
+        
+        type(lgargs_t), intent(in) :: args
+        !! Values for model and control parameters
+
+        real(c_double), intent(in) :: a
+        !! Scale factor
+        
+        real(c_double), intent(inout) :: y(2)
+        !! Current values (replaced by derivative values)
+
+        real(c_double) :: p, q, ym, yk, yde, y1, y2, y3, ydot3
+
+        ! Hubble function E(a) and its derivative
+        ym    = args%Om0 / a**3                     ! matter 
+        yk    = ( 1 - args%Om0 - args%Ode0 ) / a**2 ! curvature
+        p     = 3*args%wa * (a - 1)
+        q     = 3*(1 + args%w0 + args%wa)  
+        yde   = args%Ode0 * exp(p) * a**(-q)        ! w0-wa dark energy
+        y3    = ym + yk + yde                       ! E(a)^2
+        p     = p + q - 3*args%wa 
+        ydot3 = -( 3*ym + 2*yk + p*yde ) / (2*a*y3) ! dlnE(a)/da
+
+        ! Growth factor ODE
+        y1   = y(1)
+        y2   = y(2)
+        y(1) = y2
+        y(2) = -(3.d0 / a + ydot3) + (1.5d0*ym / a**2) * (y1 / y3)
+        
+    end subroutine growth_ode
+
+    subroutine solve_growth_ode(args, steps, z, dz) bind(c)
+        !! Calculate the value of linear growth factor in a w0-wa CDM model
+        !! cosmology. This solves the ODE for growth factor using RK4 method
+        !! and returns the values in scale factor range [0, 1].
+        
+        type(lgargs_t), intent(in) :: args
+        !! Values for model and control parameters
+
+        integer(c_int64_t), intent(in), value :: steps
+        !! Number of steps
+
+        real(c_double), intent(out) :: z(steps)
+        !! Redshift values
+
+        real(c_double), intent(out) :: dz(2, steps)
+        !! Values of linear growth factor and linear growth rate
+
+        real(c_double), dimension(2) :: y, k1, k2, k3, k4
+        real(c_double)     :: a, da, da_2, da_6
+        integer(c_int64_t) :: step
+
+        ! Calculate stepsize
+        da   = 1._c_double / steps
+        da_2 = da / 2._c_double
+        da_6 = da / 6._c_double 
+
+        ! Initial values: using D(a) ~ a for smaller a
+        y = [ 0._c_double, 1._c_double ]
+        
+        a = da 
+        do step = 1, steps
+            ! ODE solution using RK4
+            
+            k1(:) = y(:) 
+            call growth_ode(args, a, k1)
+
+            a  = a + da_2
+            k2 = y + k1 * da_2
+            call growth_ode(args, a, k2)
+            
+            k3 = y + k2 * da_2
+            call growth_ode(args, a, k3)
+            
+            a  = a + da_2
+            k4 = y + k3 * da
+            call growth_ode(args, a, k4)
+
+            dz(:, step) = y + (k1 + 2*k2 + 2*k3 + k4) * da_6
+            z(step)     = 1._c_double / a - 1
+
+        end do
+        
+    end subroutine solve_growth_ode
     
 end module growthfactor
