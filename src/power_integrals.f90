@@ -7,64 +7,11 @@ module power_integrals
     implicit none
 
     private
-    public :: variance, correlation, linear_growth
+    public :: variance, correlation
 
     real(c_double), parameter :: pi  = 3.141592653589793_c_double
     
 contains
-
-    function linear_growth(z, efunc, args, abstol, reltol, maxiter) result(res) bind(c)
-        !! Calculate the linear growth factor at redshift z.
-
-        real(c_double), intent(in), value :: z
-        !! Redshift value
-
-        interface
-            function efunc(z_, args_) result(y) bind(c)
-                !! Hubble parameter function
-                import :: c_double, c_ptr
-                real(c_double), value :: z_
-                type(c_ptr), value :: args_
-                real(c_double) :: y
-            end function
-        end interface
-
-        type(c_ptr), value :: args
-        ! Other arguments to pass to the function
-
-        real(c_double), intent(in), value :: abstol
-        !! Absolute tolerance
-
-        real(c_double), intent(in), value :: reltol
-        !! Relative tolerance
-
-        integer(c_int64_t), intent(in), value :: maxiter
-        !! Maximum number of iterations for calculating integral
-
-        real(c_double) :: res
-        !! Value of linear growth factor
-        
-        real(c_double), parameter :: a_start = 0._c_double
-        real(c_double) :: a_stop, err
-        integer(c_int) :: stat
-
-        a_stop = 1._c_double / (z + 1)
-        call integrate(integrand, a_start, a_stop, args, abstol, reltol, maxiter, res, err, stat)
-        res = res * efunc(z, args)
-
-    contains
-
-        function integrand(a_, args_) result(y_)
-            !! Integrand for growth factor integration
-            real(c_double), value :: a_ !! Scale factor
-            type(c_ptr), value :: args_
-            real(c_double) :: z_, y_
-
-            z_ = 1._c_double / a_ - 1._c_double
-            y_ = ( a_ * efunc(z_, args_) )**(-3)
-        end function integrand
-    
-    end function linear_growth
 
     function variance(lnr, j, nu, filt, pktab, size, rule) result(res) bind(C)
         !! Calculate the value of smoothed matter variance for j=0 and nu=0.
