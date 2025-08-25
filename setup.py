@@ -7,7 +7,10 @@ class BuildShared(build_ext):
         # compile Fortran to shared lib manually
         subprocess.check_call(
             ["gfortran", "-shared", "-fPIC", "-J", ".include", 
-             "quadutils.f90", "powerspectrum.f90", "power_integrals.f90", 
+             "src/quadutils.f90", 
+             "src/powerspectrum.f90", 
+             "src/power_integrals.f90",
+             "src/growthfactor.f90", 
              "-o", "libpowerspectrum.so"]
         )
 
