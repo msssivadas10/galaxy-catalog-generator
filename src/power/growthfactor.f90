@@ -1,12 +1,12 @@
-module growthfactor
-    !!
+module growthfactor_mod
     !! Calculation of linear growth factor in a w0-wa CDM cosmology model.
-    !!
+
     use iso_c_binding
-    use quadutils
+    use integrate_mod
     implicit none
 
-    private :: integrand, growth_ode
+    private 
+    public :: linear_growth, solve_growth_ode
 
     type, public, bind(c) :: lgargs_t
         !! A struct containing values of various arguments for growth 
@@ -99,7 +99,6 @@ contains
                        abstol, reltol, maxiter,            &
                        res, err, stat                      &
         )
-
                        
         ! Calculating Hubble function, E^2(a)
         ym  = args%Om0 / a**3                     ! matter
@@ -207,4 +206,4 @@ contains
         
     end subroutine solve_growth_ode
     
-end module growthfactor
+end module growthfactor_mod
