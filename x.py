@@ -109,34 +109,6 @@ lib.init_eisenstein98_zb( ctypes.byref(args) )
 # print('k_silk     = ', args.k_silk    )
 # print('param      = ', list(args.param))
 
-lib.make_functable.argtypes = [
-    CALLBACK, 
-    ctypes.c_double, 
-    ctypes.c_double, 
-    ctypes.c_void_p, # context pointer
-    ctypes.c_int64,
-    ctypes.c_int,
-    np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags='C_CONTIGUOUS'), 
-    ctypes.POINTER(ctypes.c_int),
-]
-lib.make_functable.restype = None
-
-a     = np.log(1e-4)
-b     = np.log(1e+4)
-n     = 700
-rule  = 0
-pktab = np.zeros((n, 2), np.float64)
-stat  = ctypes.c_int(0) 
-lib.make_functable(
-    as_callback(lib.ps_eisenstein98_zb), 
-    a, b, 
-    ctypes.cast(ctypes.pointer(args), ctypes.c_void_p), 
-    n, 
-    rule, 
-    pktab, 
-    ctypes.byref(stat), 
-)
-
 lib.variance.argtypes = [
     ctypes.c_double, 
     ctypes.c_int, 
@@ -159,10 +131,14 @@ lib.correlation.argtypes = [
 lib.correlation.restype = ctypes.c_double
 correlation = np.vectorize(lib.correlation, excluded=[2])
 
-var8_calc  = variance( np.log(8./args.h), 0, 0, 0, pktab, pktab.shape[0], rule )
+pktab = np.zeros((1001, 2))
+pktab[:, 0] = np.linspace( np.log(1e-04), np.log(1e+04), pktab.shape[0] )
+pktab[:, 1] = ps_eisenstein98_zb(pktab[:, 0], ctypes.byref(args))
+
+var8_calc  = variance( np.log(8./args.h), 0, 0, 0, pktab, pktab.shape[0], pktab.shape[1] )
 args.norm  = args.sigma8**2 / var8_calc 
 pktab[:,1] = pktab[:,1] + np.log(args.norm)
-# print( variance( np.log(8./args.h), 0, 0, 0, pktab, pktab.shape[0], rule ), args.sigma8**2 )
+# print( variance( np.log(8./args.h), 0, 0, 0, pktab, pktab.shape[0], pktab.shape[1] ), args.sigma8**2 )
 
 # z = np.linspace(0., 10, 11)
 # y = linear_growth(z, 0, ctypes.byref(args_gf))
@@ -174,9 +150,9 @@ pktab[:,1] = pktab[:,1] + np.log(args.norm)
 # plt.loglog(k, y, '-o')
 # plt.show()
 
-r = np.logspace(-3, 2, 11)
-s = variance( np.log(r), 0, 0, 0, pktab, pktab.shape[0], rule )
-c = correlation( np.log(r), 0, pktab, pktab.shape[0], rule )
-plt.loglog(r, s, '-o')
-plt.loglog(r, c, '-o')
-plt.show()
+# r = np.logspace(-3, 2, 11)
+# s = variance( np.log(r), 0, 0, 0, pktab, pktab.shape[0], pktab.shape[1] )
+# c = correlation( np.log(r), 0, pktab, pktab.shape[0], pktab.shape[1] )
+# plt.loglog(r, s, '-o')
+# plt.loglog(r, c, '-o')
+# plt.show()
