@@ -3,7 +3,7 @@ module eisenstein98_mnu_mod
     !! including massive neutrinos.
     
     use iso_c_binding
-    use pm_ingredients_mod
+    use pm_baselib_mod
     implicit none
 
     private

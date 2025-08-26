@@ -1,4 +1,4 @@
-module pm_ingredients_mod
+module pm_baselib_mod
     !! Values and derived types required for power spectrum calculations.
 
     use iso_c_binding
@@ -73,4 +73,4 @@ module pm_ingredients_mod
         
     end type
 
-end module pm_ingredients_mod
+end module pm_baselib_mod
