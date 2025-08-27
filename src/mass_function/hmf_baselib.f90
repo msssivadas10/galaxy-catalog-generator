@@ -41,6 +41,9 @@ module hmf_baselib_mod
 
         real(c_double) :: rho_m
         !! Total matter density at redshift 0 (unit: Msun/Mpc^3)
+
+        real(c_double) :: param(6)
+        !! Model parameters
         
     end type
     
