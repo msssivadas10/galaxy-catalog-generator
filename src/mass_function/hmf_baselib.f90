@@ -21,6 +21,9 @@ module hmf_baselib_mod
         real(c_double) :: z
         !! Redshift
 
+        real(c_double) :: lnm
+        !! Natural log of halo mass in Msun
+
         real(c_double) :: H0
         !! Hubble parameter
         
@@ -29,9 +32,6 @@ module hmf_baselib_mod
 
         real(c_double) :: Delta_m
         !! Matter overdensity w.r.to mean background density
-
-        real(c_double) :: lnm
-        !! Natural log of halo mass in Msun
 
         real(c_double) :: s
         !! Matter variance corresponding to halo mass
