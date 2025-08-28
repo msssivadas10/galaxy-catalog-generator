@@ -3,6 +3,8 @@ __pycache__
 *.log
 *.dat
 *.so
+*.out
+*.mod
 test.py
 out/
 logs/
