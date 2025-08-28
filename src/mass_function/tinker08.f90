@@ -84,7 +84,7 @@ contains
         !! Arguments
 
         integer(c_int), intent(in), value :: target_code
-        !! Code for output value (0=dn/dm, 1=dn/dlnm, 2=dn/dlog10m)
+        !! Code for output value (0=dn/dm, 1=dn/dlnm, 2=dn/dlog10m, other=fs)
         
         real(c_double) :: res, A_, a, b, c, alpha, zp1, s
 
@@ -106,6 +106,9 @@ contains
         ! Tinker (2008) mass-function, f(s)
         s   = args%s
         res = A_ * (1._c_double + (b / s)**a) * exp(-c / s**2)
+
+        if ( target_code == 0 .or. target_code == 1 .or. target_code == 2 ) &
+            res = convert_fs_to_hmf(args, res, target_code)
         
     end function hmf_tinker08
     
