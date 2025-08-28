@@ -73,7 +73,7 @@ contains
 
 ! Basic setup routine
 
-    subroutine setup_hmf(args, filt, pktab, size, cls)
+    subroutine setup_hmf(args, filt, pktab, size, cls) bind(c)
         !! Calculate related quantities for halo mass-function calculation.
         !!
         !! NOTE: If a model has specific setup routine, that should be called   
