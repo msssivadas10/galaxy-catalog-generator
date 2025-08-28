@@ -1,6 +1,7 @@
 module growthfactor_mod
     !! Calculation of linear growth factor in a w0-wa CDM cosmology model.
 
+    use iso_fortran_env, only: stderr => error_unit
     use iso_c_binding
     use integrate_mod
     implicit none
@@ -99,6 +100,8 @@ contains
                        abstol, reltol, maxiter,            &
                        res, err, stat                      &
         )
+        if ( stat /= 0 ) &
+            write(stderr,'(a)') 'warning: linear_growth: integral failed to converge'
                        
         ! Calculating Hubble function, E^2(a)
         ym  = args%Om0 / a**3                     ! matter
