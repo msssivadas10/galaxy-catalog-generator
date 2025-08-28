@@ -39,7 +39,7 @@ module growthfactor_mod
 contains
 
     function integrand(a, argsp) result(res)
-        !! Integrand for growth factor calculations
+        !! Integrand for growth factor calculations: `(a*E(a))**-1.5`
 
         real(c_double), value :: a
         !! Scale factor 
@@ -51,20 +51,16 @@ contains
         !! Value of the function
 
         type(lgargs_t), pointer :: cm ! w0-wa CDM model
-        real(c_double) :: p, q ! Related to drak energy density
+        real(c_double) :: p, q, Ok0
 
         ! Get pointer to args 
         call c_f_pointer(argsp, cm)
 
-        ! Calculating Hubble function, E^2(a)
+        Ok0 = (1 - cm%Om0 - cm%Ode0)
         p   = 3*cm%wa
         q   = 3*(1 + cm%w0 + cm%wa) 
-        res = ( cm%Om0 / a + (1 - cm%Om0 - cm%Ode0) ) / a**2 ! Matter + Curvature
-        res = res + cm%Ode0 * exp( p*(a - 1) ) * a**(-q)     ! w0-wa dark energy
-        res = sqrt(res)
-
-        ! Integrand
-        res = (res * a)**(-3)
+        res = a / ( cm%Om0 + Ok0 * a + cm%Ode0 * exp( p*(a-1) ) * a**(3-q) )
+        res = res**(1.5_c_double)
 
     end function integrand
 
@@ -84,7 +80,7 @@ contains
         real(c_double) :: res
         !! Return value
 
-        real(c_double), parameter :: a_start = 0.0_c_double
+        real(c_double), parameter :: a_start = 1.e-08_c_double
 
         real(c_double) :: abstol, reltol, a, ym, yk, yde, p, q, y, err
         integer(c_int) :: stat
