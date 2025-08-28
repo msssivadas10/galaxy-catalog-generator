@@ -64,8 +64,10 @@ module mass_function_mod
         real(c_double) :: rho_m
         !! Total matter density at redshift 0 (unit: Msun/Mpc^3)
 
-        real(c_double) :: param(6)
-        !! Model parameters
+        real(c_double) :: param(16)
+        !! Model parameters: since this is used by both mass-function and 
+        !! halo bias models, first 8 values are mass reserved for mass-function
+        !! parameters and the other 8 are for bias parameters. 
         
     end type
     
