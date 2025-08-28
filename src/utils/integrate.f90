@@ -9,8 +9,11 @@ module integrate_mod
 
     integer, parameter :: dp = c_double
 
-    integer, parameter :: GKSIZE = 8
-    !! Size of the Gauss-Kronrod rule array 
+    real(c_double), parameter :: PI = 3.141592653589793_c_double
+    !! Pi
+
+    integer, parameter :: KSIZE = 8
+    !! Size of the Kronrod rule array 
 
     real(c_double), parameter :: K15(2, 8) = reshape([ &
     !   nodes               , weights               
@@ -36,7 +39,7 @@ module integrate_mod
     !! Nodes and weights of for Gauss-7 rule. Exact for polynomials upto 
     !! degree 13. Points are symmetric about x=0 and subset of Kronrod-15
     !! rule.
-
+    
 contains
 
     subroutine integrate(f, a, b, args, abstol, reltol, maxiter, res, err, stat) bind(c)
@@ -47,7 +50,7 @@ contains
                 !! Function to integrate
                 import :: c_double, c_ptr
                 real(c_double), value :: x
-                type(c_ptr)   , value :: args_ 
+                type(c_ptr), value :: args_ 
                 real(c_double) :: y
             end function
         end interface
@@ -78,14 +81,13 @@ contains
 
         integer(c_int), intent(out) :: stat
         !! Error code: 0=ok, 1=integral not converged
-        
+
         integer(c_int64_t) :: iter, j
         real(c_double)     :: intg, intk, fval, scale
         real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
-        
         integer(c_int64_t) :: heap_size, heap_capacity
         real(c_double), allocatable :: heap(:, :)
-
+   
         heap_size     = 0
         heap_capacity = 10*maxiter ! Heap capacity
         allocate( heap(4, heap_capacity) )
@@ -95,7 +97,7 @@ contains
         fval  = f(a + scale, args)
         intk  = fval * K15(2,1) 
         intg  = fval *  G7(2,1) 
-        do j = 2, GKSIZE
+        do j = 2, KSIZE
             fval = f(a + scale * (1. - K15(1,j)) , args) + f(a + scale * (1. + K15(1,j)) , args)
             intk = intk + fval * K15(2,j)
             if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
@@ -104,7 +106,7 @@ contains
         intg = scale * intg
         I0   = intk
         err0 = abs(intk - intg)
-        call int_heap_push(heap, heap_size, heap_capacity, a, b, I0, err)
+        call int_heap_push(heap, heap_size, heap_capacity, a, b, I0, err0)
 
         res  = I0
         err  = err0
@@ -119,15 +121,15 @@ contains
 
             ! Pop worst interval
             call int_heap_pop(heap, heap_size, heap_capacity, xa, xb, I0, err0)
-            
-            xm = 0.5_dp * (xa + xb) 
+
+            xm = 0.5_dp * (xa + xb)
             
             ! Refine on left interval
             scale = 0.5_dp * (xm - xa)
             fval  = f(xa + scale, args)
             intk  = fval * K15(2,1) 
             intg  = fval *  G7(2,1) 
-            do j = 2, GKSIZE
+            do j = 2, KSIZE
                 fval = f(xa + scale * (1. - K15(1,j)) , args) + f(xa + scale * (1. + K15(1,j)) , args)
                 intk = intk + fval * K15(2,j)
                 if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
@@ -143,7 +145,7 @@ contains
             fval  = f(xm + scale, args)
             intk  = fval * K15(2,1) 
             intg  = fval *  G7(2,1) 
-            do j = 2, GKSIZE
+            do j = 2, KSIZE
                 fval = f(xm + scale * (1. - K15(1,j)) , args) + f(xm + scale * (1. + K15(1,j)) , args)
                 intk = intk + fval * K15(2,j)
                 if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
@@ -167,46 +169,43 @@ contains
     subroutine leggauss(n, x, w) bind(c)
         !! Generate Gauss-Legendre quadrature rule of order N for [-1, 1].
 
-        integer(c_int), intent(in), value :: n    
-        !! Order (number of nodes)
-        
-        real(c_double), intent(out) :: x(n) 
-        !! Nodes 
-        
-        real(c_double), intent(out) :: w(n) 
-        !! Weights
+        integer(c_int), intent(in), value  :: n
+        !! Order of the rule: number of nodes.
 
-        real(c_double), parameter :: PI  = 3.141592653589793_dp
-        !! Pi
+        real(c_double), intent(out) :: x(n)
+        !! Nodes 
+
+        real(c_double), intent(out) :: w(n)
+        !! Weights
 
         real(c_double) :: xj, xjo, pm, pn, ptmp
         integer(c_int) :: j, k
 
         ! If order is odd number, x = 0 is a node
         if ( modulo(n, 2) == 1 ) then
-            ! Calculating legendre polynomial P_n(0) using its reccurence relation
-            xj = 0.0_dp
-            pm = 0.0_dp
-            pn = 1.0_dp
+            ! Calculating Legendre polynomial P_n(0) using its reccurence relation
+            xj = 0._c_double
+            pm = 0._c_double
+            pn = 1._c_double
             do k = 0, n-1
-                ptmp = -k*pm / (k + 1.0_dp)
+                ptmp = -k*pm / (k + 1._c_double)
                 pm   = pn
                 pn   = ptmp
             end do
-            x(n/2 + 1) = 0.0_dp
-            w(n/2 + 1) = 2.0_dp / (n*pm)**2 ! weight 
+            x(n/2 + 1) = 0._c_double
+            w(n/2 + 1) = 2._c_double / (n*pm)**2 ! weight 
         end if
 
-        ! Other nodes (roots of the n-th legendre polynomial)
+        ! Other nodes (roots of the n-th Legendre polynomial)
         do j = 1, n/2
-            xj  = cos( (2*j - 0.5_dp)*PI / (2*n + 1.0_dp) ) ! initial guess for the root
-            xjo = 100.0_dp ! or any large number > 1
-            do while ( abs(xj - xjo) > 1e-08_dp )
-                ! Calculating lenegedre polynomial P_n(xj) using its reccurence relation
-                pm = 0.0_dp
-                pn = 1.0_dp
+            xj  = cos( (2*j - 0.5_c_double) * PI / (2*n + 1._c_double) ) ! Initial guess for the root
+            xjo = 100._c_double 
+            do while ( abs(xj - xjo) > 1e-08_c_double )
+                ! Calculating Legendre polynomial P_n(xj) using its reccurence relation
+                pm = 0._c_double
+                pn = 1._c_double
                 do k = 0, n-1
-                    ptmp = ( (2*k + 1)*xj*pn - k*pm ) / (k + 1.0_dp)
+                    ptmp = ( (2*k + 1)*xj*pn - k*pm ) / (k + 1._c_double)
                     pm   = pn
                     pn   = ptmp
                 end do
@@ -214,9 +213,9 @@ contains
                 xj  = xj - pn * (xj**2 - 1) / (n*xj*pn - n*pm)
             end do
             x(j)     = -xj
-            w(j)     =  2*(1 - xj**2) / (n*xj*pn - n*pm)**2 ! weight
+            w(j)     =  2*(1 - xj**2) / (n*xj*pn - n*pm)**2 !! weight
             x(n-j+1) =  xj
-            w(n-j+1) =  w(j)            
+            w(n-j+1) =  w(j)
         end do
     
     end subroutine leggauss
