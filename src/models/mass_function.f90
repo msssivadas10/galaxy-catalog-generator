@@ -59,7 +59,7 @@ module mass_function_mod
         !! Matter variance corresponding to halo mass
 
         real(c_double) :: dlnsdlnm 
-        !! LOg derivative of matter variance w.r.to halo mass
+        !! Log derivative of matter variance w.r.to halo mass
 
         real(c_double) :: rho_m
         !! Total matter density at redshift 0 (unit: Msun/Mpc^3)
