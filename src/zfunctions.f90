@@ -69,6 +69,16 @@ contains
         maxiter = max(args%maxiter, 50_c_int64_t  )
         
         a = 1.0_c_double / (z + 1.0_c_double) ! scale factor
+        if ( abs(a) < 1e-08_c_double ) then
+            ! For very small values scale factor, growth factor = scale factor (approx.)
+            if ( nu /= 0 ) then 
+                res = 1.0_c_double ! Linear growth rate: first log derivative
+            else
+                res = a ! Linear growth factor
+            end if
+            return
+        end if
+        ! Evaluating the integral:
         call integrate(growth_integrand, a_start, a, args, &
                        abstol, reltol, maxiter,            &
                        res, err, stat                      &
@@ -86,7 +96,7 @@ contains
 
         if ( nu /= 0 ) then
             ! Linear growth rate: first log derivative
-            res = 1.0_c_double / ( (a*y)**3 * res )
+            res = 1.0_c_double / ( res * a**2 * y**1.5_c_double )
             p   = p + q - 3*args%wa 
             y   = -( 3*ym + 2*yk + p*yde ) / (2*y) ! log derivative of E(a)
             res = res + y
