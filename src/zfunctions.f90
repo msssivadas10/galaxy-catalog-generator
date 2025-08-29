@@ -1,5 +1,5 @@
 module zfunctions_mod
-    !! Calculation of some functions of redshiftin a w0-wa CDM cosmology model, 
+    !! Calculation of some functions of redshift in a w0-wa CDM cosmology model, 
     !! such as the linear growth factor.
 
     use iso_fortran_env, only: stderr => error_unit
