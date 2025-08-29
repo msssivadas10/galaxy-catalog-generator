@@ -1,19 +1,16 @@
 module integrate_mod
-    !! Routines for numerical integration.
+    !! Helper routines for numerical integration.
 
     use iso_c_binding
     implicit none
 
     private
-    public :: integrate, leggauss
+    public :: leggauss, G7K15, G7K15_nodes, int_heap_push, int_heap_pop
 
     integer, parameter :: dp = c_double
 
     real(c_double), parameter :: PI = 3.141592653589793_c_double
     !! Pi
-
-    integer, parameter :: KSIZE = 8
-    !! Size of the Kronrod rule array 
 
     real(c_double), parameter :: K15(2, 8) = reshape([ &
     !   nodes               , weights               
@@ -42,18 +39,8 @@ module integrate_mod
     
 contains
 
-    subroutine integrate(f, a, b, args, abstol, reltol, maxiter, res, err, stat) bind(c)
-        !! Calculate the integral of a scalar function f(x) over the interval [a, b]. 
-
-        interface
-            function f(x, args_) result(y) bind(c)
-                !! Function to integrate
-                import :: c_double, c_ptr
-                real(c_double), value :: x
-                type(c_ptr), value :: args_ 
-                real(c_double) :: y
-            end function
-        end interface
+    subroutine G7K15_nodes(a, b, x) bind(c)
+        !! Return the Kronrod-15 quadrature nodes in the interval [a, b]. 
 
         real(c_double), intent(in), value :: a
         !! Lower limit of integration
@@ -61,17 +48,35 @@ contains
         real(c_double), intent(in), value :: b
         !! Upper limit of integration
 
-        type(c_ptr), value :: args
-        !! Other arguments to pass to the function
+        real(c_double), intent(out) :: x(15)
+        !! Nodes. The first 8 values are the positive K15 nodes and the 
+        !! remaining 7 correspond are the negative nodes.
+    
+        integer(c_int) :: j
+        real(c_double) :: scale
 
-        real(c_double), intent(in), value :: abstol
-        !! Absolute tolerance
+        scale = 0.5_c_double * (b - a)
+        x(1)  = a + scale
+        do j = 2, 8
+            x(j  ) = a + scale * (1._c_double + K15(1,j))
+            x(j+7) = a + scale * (1._c_double - K15(1,j))
+        end do
+        
+    end subroutine G7K15_nodes
 
-        real(c_double), intent(in), value :: reltol
-        !! Relative tolerance
+    subroutine G7K15(f, a, b, res, err) bind(c)
+        !! Calculate the integral of a function using (G7,K15) rule, given the 
+        !! values of the function at the nodes. 
 
-        integer(c_int64_t), intent(in), value :: maxiter
-        !! Maximum number of iterations for calculating integral
+        real(c_double), intent(in) :: f(15)
+        !! Function values at nodes. The first 8 values correspond to the positive 
+        !! K15 nodes and the remaining 7 correspond to the negative nodes.
+
+        real(c_double), intent(in), value :: a
+        !! Lower limit of integration
+
+        real(c_double), intent(in), value :: b
+        !! Upper limit of integration
 
         real(c_double), intent(out) :: res
         !! Value of the integral of f over [a, b]
@@ -79,92 +84,23 @@ contains
         real(c_double), intent(out) :: err
         !! Estimate of the error in integration
 
-        integer(c_int), intent(out) :: stat
-        !! Error code: 0=ok, 1=integral not converged
+        integer(c_int) :: j
+        real(c_double) :: intg, intk, fsum, scale
 
-        integer(c_int64_t) :: iter, j
-        real(c_double)     :: intg, intk, fval, scale
-        real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
-        integer(c_int64_t) :: heap_size, heap_capacity
-        real(c_double), allocatable :: heap(:, :)
-   
-        heap_size     = 0
-        heap_capacity = 10*maxiter ! Heap capacity
-        allocate( heap(4, heap_capacity) )
-
-        ! Initial evaluation
-        scale = 0.5_dp * (b - a)
-        fval  = f(a + scale, args)
-        intk  = fval * K15(2,1) 
-        intg  = fval *  G7(2,1) 
-        do j = 2, KSIZE
-            fval = f(a + scale * (1. - K15(1,j)) , args) + f(a + scale * (1. + K15(1,j)) , args)
-            intk = intk + fval * K15(2,j)
-            if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
+        scale = 0.5_c_double * (b - a)
+        intk  = f(1) * K15(2,1) ! Integral using Kronrod-15 rule
+        intg  = f(1) *  G7(2,1) ! Integral using Gauss-7 rule
+        do j = 2, 8
+            fsum = f(j) + f(j+7)
+            intk = fsum * K15(2,j)
+            if ( mod(j, 2) == 1 ) intg = intg + fsum * G7(2,(j+1)/2) ! Point also in G7 rule
         end do
         intk = scale * intk
         intg = scale * intg
-        I0   = intk
-        err0 = abs(intk - intg)
-        call int_heap_push(heap, heap_size, heap_capacity, a, b, I0, err0)
-
-        res  = I0
-        err  = err0
-        stat = 1
-        do iter = 1, maxiter
-
-            ! Stop if tolerance is met
-            if ( err <= max(abstol, reltol*abs(res)) ) then
-                stat = 0 
-                exit
-            endif
-
-            ! Pop worst interval
-            call int_heap_pop(heap, heap_size, heap_capacity, xa, xb, I0, err0)
-
-            xm = 0.5_dp * (xa + xb)
-            
-            ! Refine on left interval
-            scale = 0.5_dp * (xm - xa)
-            fval  = f(xa + scale, args)
-            intk  = fval * K15(2,1) 
-            intg  = fval *  G7(2,1) 
-            do j = 2, KSIZE
-                fval = f(xa + scale * (1. - K15(1,j)) , args) + f(xa + scale * (1. + K15(1,j)) , args)
-                intk = intk + fval * K15(2,j)
-                if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
-            end do
-            intk = scale * intk
-            intg = scale * intg
-            I1   = intk
-            err1 = abs(intk - intg)
-            call int_heap_push(heap, heap_size, heap_capacity, xa, xm, I1, err1) ! Push new interval back
-            
-            ! Refine on left interval
-            scale = 0.5_dp * (xb - xm)
-            fval  = f(xm + scale, args)
-            intk  = fval * K15(2,1) 
-            intg  = fval *  G7(2,1) 
-            do j = 2, KSIZE
-                fval = f(xm + scale * (1. - K15(1,j)) , args) + f(xm + scale * (1. + K15(1,j)) , args)
-                intk = intk + fval * K15(2,j)
-                if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
-            end do
-            intk = scale * intk
-            intg = scale * intg
-            I2   = intk
-            err2 = abs(intk - intg)
-            call int_heap_push(heap, heap_size, heap_capacity, xm, xb, I2, err2) ! Push new interval back
-            
-            ! Update global sums
-            res = res + (I1   + I2   - I0  ) ! replace old interval
-            err = err + (err1 + err2 - err0)
-            
-        end do
-
-        deallocate(heap)
+        res  = intk
+        err  = abs(intk - intg)
         
-    end subroutine integrate
+    end subroutine G7K15
 
     subroutine leggauss(n, x, w) bind(c)
         !! Generate Gauss-Legendre quadrature rule of order N for [-1, 1].
@@ -219,8 +155,6 @@ contains
         end do
     
     end subroutine leggauss
-
-    ! Helper functions (private):
 
     subroutine int_heap_push(heap, size, capacity, a, b, val, err)
         !! Push the integration result on a interval [a, b] to the interval heap.
@@ -326,29 +260,3 @@ contains
     end subroutine int_heap_pop
 
 end module integrate_mod
-
-! program main
-!     use iso_c_binding
-!     use integrate_mod
-!     implicit none
-!     !
-!     real(c_double)    , parameter :: PI  = 3.141592653589793_c_double
-!     real(c_double)    , parameter :: eps = 1.0d-08
-!     integer(c_int64_t), parameter :: n   = 50
-!     real(c_double) :: res, err
-!     integer(c_int) :: ier
-!     type(c_ptr)    :: ctx
-!     !   
-!     ctx = c_null_ptr
-!     call integrate(myfun, -10.0d0, 10.0d0, ctx, eps, eps, n, res, err, ier)
-!     print *, 'Result =', res, ' Error =', err, ' Status:', ier
-!     print *, sqrt(PI)
-! contains
-!     function myfun(x, ctx) result(val) bind(c)
-!         use iso_c_binding
-!         real(c_double), value :: x
-!         type(c_ptr), value :: ctx
-!         real(c_double) :: val
-!         val = exp(-x**2)
-!     end function myfun
-! end program main
