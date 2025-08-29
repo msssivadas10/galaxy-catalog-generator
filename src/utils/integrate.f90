@@ -39,7 +39,7 @@ module integrate_mod
     
 contains
 
-    subroutine G7K15_nodes(a, b, x) bind(c)
+    subroutine G7K15_nodes(a, b, x) 
         !! Return the Kronrod-15 quadrature nodes in the interval [a, b]. 
 
         real(c_double), intent(in), value :: a
@@ -64,7 +64,7 @@ contains
         
     end subroutine G7K15_nodes
 
-    subroutine G7K15(f, a, b, res, err) bind(c)
+    subroutine G7K15(f, a, b, res, err) 
         !! Calculate the integral of a function using (G7,K15) rule, given the 
         !! values of the function at the nodes. 
 
@@ -102,7 +102,7 @@ contains
         
     end subroutine G7K15
 
-    subroutine leggauss(n, x, w) bind(c)
+    subroutine leggauss(n, x, w) 
         !! Generate Gauss-Legendre quadrature rule of order N for [-1, 1].
 
         integer(c_int), intent(in), value  :: n

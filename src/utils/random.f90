@@ -20,14 +20,14 @@ module random_mod
     real(c_double), parameter :: pi = 3.141592653589793_c_double
     !! Pi
 
-    type, public, bind(c) :: rstate_t
+    type, public :: rstate_t
         !! Random number generator state
         integer(i64) :: state
     end type
 
 contains
 
-    subroutine pcg32_init(self, seed) bind(c)
+    subroutine pcg32_init(self, seed)
         !! Initialize a PCG32 random number generator.
 
         type(rstate_t), intent(inout) :: self
@@ -43,7 +43,7 @@ contains
         
     end subroutine pcg32_init
 
-    function pcg32_random(self) result(rword) bind(c)
+    function pcg32_random(self) result(rword)
         !! Return a 32 bit random integer generated using PCG32 generator. 
         !! Range: -2147483648 to 2147483647 (i.e., 2^31 - 1)
 
@@ -70,7 +70,7 @@ contains
         
     end function pcg32_random
 
-    function uniform_rv(self) result(rv) bind(c)
+    function uniform_rv(self) result(rv)
         !! Generate a uniform random number in [0, 1).
 
         type(rstate_t), intent(inout) :: self
@@ -85,7 +85,7 @@ contains
 
     end function uniform_rv
 
-    function normal_rv(self, mu, std) result(rv) bind(c)
+    function normal_rv(self, mu, std) result(rv)
         !! Generate a Normal random number.
 
         type(rstate_t), intent(inout) :: self
@@ -105,7 +105,7 @@ contains
 
     end function normal_rv
     
-    function poisson_rv(self, lam) result(rv) bind(c)
+    function poisson_rv(self, lam) result(rv)
         !! Generate a Poisson random number.
 
         type(rstate_t), intent(inout) :: self
@@ -167,7 +167,7 @@ contains
         
     end function poisson_rv
 
-    function binomial_rv(self, n, p) result(rv) bind(c)
+    function binomial_rv(self, n, p) result(rv)
         !! Generate a Binomial random number.
 
         type(rstate_t), intent(inout) :: self
