@@ -2,7 +2,7 @@ module mass_function_mod
     !! Halo mass-function models.
     
     use iso_c_binding
-    use variance_mod
+    use rfunctions_mod
     implicit none
 
     private
