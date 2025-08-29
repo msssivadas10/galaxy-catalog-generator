@@ -41,28 +41,6 @@ contains
 
 ! Linear Growth Factor:
 
-    function growth_integrand(a, args) result(res)
-        !! Integrand for growth factor calculations: `(a*E(a))**-1.5`
-
-        real(c_double), value :: a
-        !! Scale factor 
-
-        type(zfargs_t) :: args
-        !! Model parameters (w0-wa CDM model)
-        
-        real(c_double) :: res
-        !! Value of the function
-
-        real(c_double) :: p, q, Ok0
-
-        Ok0 = (1 - args%Om0 - args%Ode0)
-        p   = 3*args%wa
-        q   = 3*(1 + args%w0 + args%wa) 
-        res = a / ( args%Om0 + Ok0 * a + args%Ode0 * exp( p*(a-1) ) * a**(3-q) )
-        res = res**(1.5_c_double)
-
-    end function growth_integrand
-
     function linear_growth(z, nu, args) result(res) bind(c)
         !! Calculate the value of linear growth factor in a w0-wa CDM model
         !! cosmology.
@@ -119,9 +97,28 @@ contains
         
     end function linear_growth
 
+    function growth_integrand(a, args) result(res)
+        !! Integrand for growth factor calculations: `(a*E(a))**-1.5`
+
+        real(c_double), value :: a
+        !! Scale factor 
+
+        type(zfargs_t) :: args
+        !! Model parameters (w0-wa CDM model)
+        
+        real(c_double) :: res, p, q, Ok0
+
+        Ok0 = (1 - args%Om0 - args%Ode0)
+        p   = 3*args%wa
+        q   = 3*(1 + args%w0 + args%wa) 
+        res = a / ( args%Om0 + Ok0 * a + args%Ode0 * exp( p*(a-1) ) * a**(3-q) )
+        res = res**(1.5_c_double)
+
+    end function growth_integrand
+
 ! Helper functions:
 
-    subroutine integrate(f, a, b, args, abstol, reltol, maxiter, res, err, stat)
+    subroutine integrate(f, a, b, args, abstol, reltol, maxiter, res, err, stat) bind(c)
         !! Calculate the integral of a scalar function f(x) over the interval [a, b]. 
 
         interface
@@ -162,7 +159,7 @@ contains
         !! Error code: 0=ok, 1=integral not converged
 
         integer(c_int64_t) :: iter, j
-        real(c_double)     :: xval(15), fval(15)
+        real(c_double)     :: intg, intk, fval, scale
         real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
         integer(c_int64_t) :: heap_size, heap_capacity
         real(c_double), allocatable :: heap(:, :)
@@ -172,9 +169,19 @@ contains
         allocate( heap(4, heap_capacity) )
 
         ! Initial evaluation
-        call G7K15_nodes(a, b, xval)             ! Get integration nodes 
-        fval = [( f(xval(j), args), j = 1, 15 )] ! Evaluate f(x) at nodes
-        call G7K15(fval, a, b, I0, err0)
+        scale = 0.5_c_double * (b - a)
+        fval  = f(a + scale, args)
+        intk  = fval * K15(2,1) 
+        intg  = fval *  G7(2,1) 
+        do j = 2, 8
+            fval = f(a + scale * (1. - K15(1,j)) , args) + f(a + scale * (1. + K15(1,j)) , args)
+            intk = intk + fval * K15(2,j)
+            if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
+        end do
+        intk = scale * intk
+        intg = scale * intg
+        I0   = intk
+        err0 = abs(intk - intg)
         call int_heap_push(heap, heap_size, heap_capacity, a, b, I0, err0)
 
         res  = I0
@@ -194,15 +201,35 @@ contains
             xm = 0.5_c_double * (xa + xb)
             
             ! Refine on left interval
-            call G7K15_nodes(xa, xm, xval)           ! Get integration nodes 
-            fval = [( f(xval(j), args), j = 1, 15 )] ! Evaluate f(x) at nodes
-            call G7K15(fval, xa, xm, I1, err1)
+            scale = 0.5_c_double * (xm - xa)
+            fval  = f(xa + scale, args)
+            intk  = fval * K15(2,1) 
+            intg  = fval *  G7(2,1) 
+            do j = 2, 8
+                fval = f(xa + scale * (1. - K15(1,j)) , args) + f(xa + scale * (1. + K15(1,j)) , args)
+                intk = intk + fval * K15(2,j)
+                if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
+            end do
+            intk = scale * intk
+            intg = scale * intg
+            I1   = intk
+            err1 = abs(intk - intg)
             call int_heap_push(heap, heap_size, heap_capacity, xa, xm, I1, err1) ! Push new interval back
             
             ! Refine on left interval
-            call G7K15_nodes(xm, xb, xval)           ! Get integration nodes 
-            fval = [( f(xval(j), args), j = 1, 15 )] ! Evaluate f(x) at nodes
-            call G7K15(fval, xm, xb, I2, err2)
+            scale = 0.5_c_double * (xb - xm)
+            fval  = f(xm + scale, args)
+            intk  = fval * K15(2,1) 
+            intg  = fval *  G7(2,1) 
+            do j = 2, 8
+                fval = f(xm + scale * (1. - K15(1,j)) , args) + f(xm + scale * (1. + K15(1,j)) , args)
+                intk = intk + fval * K15(2,j)
+                if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
+            end do
+            intk = scale * intk
+            intg = scale * intg
+            I2   = intk
+            err2 = abs(intk - intg)
             call int_heap_push(heap, heap_size, heap_capacity, xm, xb, I2, err2) ! Push new interval back
             
             ! Update global sums
@@ -210,7 +237,7 @@ contains
             err = err + (err1 + err2 - err0)
             
         end do
-        
+
         deallocate(heap)
         
     end subroutine integrate

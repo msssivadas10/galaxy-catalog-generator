@@ -1,18 +1,18 @@
 module integrate_mod
-    !! Helper routines for numerical integration.
+    !! Helper module for numerical integration.
 
     use iso_c_binding
     implicit none
 
     private
-    public :: leggauss, G7K15, G7K15_nodes, int_heap_push, int_heap_pop
+    public :: leggauss, int_heap_push, int_heap_pop
 
     integer, parameter :: dp = c_double
 
     real(c_double), parameter :: PI = 3.141592653589793_c_double
     !! Pi
 
-    real(c_double), parameter :: K15(2, 8) = reshape([ &
+    real(c_double), parameter, public :: K15(2, 8) = reshape([ &
     !   nodes               , weights               
         0.000000000000000_dp, 0.209482141084728_dp, & !*
         0.207784955007898_dp, 0.204432940075298_dp, &
@@ -26,7 +26,7 @@ module integrate_mod
     !! Nodes and weigths for Kronrod-15 rule. Exact for polynomials upto 
     !! degree 29. Points are symmetric about x=0.
     
-    real(c_double), parameter :: G7(2, 4) = reshape([ &
+    real(c_double), parameter, public :: G7(2, 4) = reshape([ &
     !   nodes               , weights               
         0.000000000000000_dp, 0.417959183673469_dp, & !*
         0.405845151377397_dp, 0.381830050505119_dp, & !*
@@ -38,69 +38,6 @@ module integrate_mod
     !! rule.
     
 contains
-
-    subroutine G7K15_nodes(a, b, x) 
-        !! Return the Kronrod-15 quadrature nodes in the interval [a, b]. 
-
-        real(c_double), intent(in), value :: a
-        !! Lower limit of integration
-
-        real(c_double), intent(in), value :: b
-        !! Upper limit of integration
-
-        real(c_double), intent(out) :: x(15)
-        !! Nodes. The first 8 values are the positive K15 nodes and the 
-        !! remaining 7 correspond are the negative nodes.
-    
-        integer(c_int) :: j
-        real(c_double) :: scale
-
-        scale = 0.5_c_double * (b - a)
-        x(1)  = a + scale
-        do j = 2, 8
-            x(j  ) = a + scale * (1._c_double + K15(1,j))
-            x(j+7) = a + scale * (1._c_double - K15(1,j))
-        end do
-        
-    end subroutine G7K15_nodes
-
-    subroutine G7K15(f, a, b, res, err) 
-        !! Calculate the integral of a function using (G7,K15) rule, given the 
-        !! values of the function at the nodes. 
-
-        real(c_double), intent(in) :: f(15)
-        !! Function values at nodes. The first 8 values correspond to the positive 
-        !! K15 nodes and the remaining 7 correspond to the negative nodes.
-
-        real(c_double), intent(in), value :: a
-        !! Lower limit of integration
-
-        real(c_double), intent(in), value :: b
-        !! Upper limit of integration
-
-        real(c_double), intent(out) :: res
-        !! Value of the integral of f over [a, b]
-
-        real(c_double), intent(out) :: err
-        !! Estimate of the error in integration
-
-        integer(c_int) :: j
-        real(c_double) :: intg, intk, fsum, scale
-
-        scale = 0.5_c_double * (b - a)
-        intk  = f(1) * K15(2,1) ! Integral using Kronrod-15 rule
-        intg  = f(1) *  G7(2,1) ! Integral using Gauss-7 rule
-        do j = 2, 8
-            fsum = f(j) + f(j+7)
-            intk = fsum * K15(2,j)
-            if ( mod(j, 2) == 1 ) intg = intg + fsum * G7(2,(j+1)/2) ! Point also in G7 rule
-        end do
-        intk = scale * intk
-        intg = scale * intg
-        res  = intk
-        err  = abs(intk - intg)
-        
-    end subroutine G7K15
 
     subroutine leggauss(n, x, w) 
         !! Generate Gauss-Legendre quadrature rule of order N for [-1, 1].
