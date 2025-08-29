@@ -100,7 +100,7 @@ contains
     function growth_integrand(a, args) result(res)
         !! Integrand for growth factor calculations: `(a*E(a))**-1.5`
 
-        real(c_double), value :: a
+        real(c_double) :: a
         !! Scale factor 
 
         type(zfargs_t) :: args
@@ -118,14 +118,14 @@ contains
 
 ! Helper functions:
 
-    subroutine integrate(f, a, b, args, abstol, reltol, maxiter, res, err, stat) bind(c)
+    subroutine integrate(f, a, b, args, abstol, reltol, maxiter, res, err, stat)
         !! Calculate the integral of a scalar function f(x) over the interval [a, b]. 
 
         interface
-            function f(x, args_) result(y) bind(c)
+            function f(x, args_) result(y)
                 !! Function to integrate
                 import :: c_double, zfargs_t
-                real(c_double), value :: x
+                real(c_double) :: x
                 type(zfargs_t) :: args_ 
                 real(c_double) :: y
             end function
