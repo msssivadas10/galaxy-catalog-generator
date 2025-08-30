@@ -168,8 +168,8 @@ contains
         integer(c_int), intent(out) :: stat
         !! Error code: 0=ok, 1=integral not converged
 
-        integer(c_int64_t) :: iter, j
-        real(c_double)     :: intg, intk, fval, scale
+        integer(c_int64_t) :: iter !, j
+        ! real(c_double)     :: intg, intk, fval, scale
         real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
         integer(c_int64_t) :: heap_size, heap_capacity
         real(c_double), allocatable :: heap(:, :)
@@ -179,19 +179,7 @@ contains
         allocate( heap(4, heap_capacity) )
 
         ! Initial evaluation
-        scale = 0.5_c_double * (b - a)
-        fval  = f(a + scale, args)
-        intk  = fval * K15(2,1) 
-        intg  = fval *  G7(2,1) 
-        do j = 2, 8
-            fval = f(a + scale * (1. - K15(1,j)) , args) + f(a + scale * (1. + K15(1,j)) , args)
-            intk = intk + fval * K15(2,j)
-            if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
-        end do
-        intk = scale * intk
-        intg = scale * intg
-        I0   = intk
-        err0 = abs(intk - intg)
+        call integrate2(f, a, b, args, I0, err0)
         call int_heap_push(heap, heap_size, heap_capacity, a, b, I0, err0)
 
         res  = I0
@@ -211,35 +199,11 @@ contains
             xm = 0.5_c_double * (xa + xb)
             
             ! Refine on left interval
-            scale = 0.5_c_double * (xm - xa)
-            fval  = f(xa + scale, args)
-            intk  = fval * K15(2,1) 
-            intg  = fval *  G7(2,1) 
-            do j = 2, 8
-                fval = f(xa + scale * (1. - K15(1,j)) , args) + f(xa + scale * (1. + K15(1,j)) , args)
-                intk = intk + fval * K15(2,j)
-                if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
-            end do
-            intk = scale * intk
-            intg = scale * intg
-            I1   = intk
-            err1 = abs(intk - intg)
+            call integrate2(f, xa, xm, args, I1, err1)
             call int_heap_push(heap, heap_size, heap_capacity, xa, xm, I1, err1) ! Push new interval back
             
             ! Refine on left interval
-            scale = 0.5_c_double * (xb - xm)
-            fval  = f(xm + scale, args)
-            intk  = fval * K15(2,1) 
-            intg  = fval *  G7(2,1) 
-            do j = 2, 8
-                fval = f(xm + scale * (1. - K15(1,j)) , args) + f(xm + scale * (1. + K15(1,j)) , args)
-                intk = intk + fval * K15(2,j)
-                if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
-            end do
-            intk = scale * intk
-            intg = scale * intg
-            I2   = intk
-            err2 = abs(intk - intg)
+            call integrate2(f, xm, xb, args, I2, err2)
             call int_heap_push(heap, heap_size, heap_capacity, xm, xb, I2, err2) ! Push new interval back
             
             ! Update global sums
@@ -251,5 +215,52 @@ contains
         deallocate(heap)
         
     end subroutine integrate
+
+    subroutine integrate2(f, a, b, args, res, err)
+        !! Calculate the integral of a scalar function f(x) over the interval [a, b]. 
+
+        interface
+            function f(x, args_) result(y)
+                !! Function to integrate
+                import :: c_double, zfargs_t
+                real(c_double) :: x
+                type(zfargs_t) :: args_ 
+                real(c_double) :: y
+            end function
+        end interface
+
+        real(c_double), intent(in), value :: a
+        !! Lower limit of integration
+
+        real(c_double), intent(in), value :: b
+        !! Upper limit of integration
+
+        type(zfargs_t) :: args
+        !! Other arguments to pass to the function
+
+        real(c_double), intent(out) :: res
+        !! Value of the integral of f over [a, b]
+
+        real(c_double), intent(out) :: err
+        !! Estimate of the error in integration
+
+        integer(c_int64_t) :: j
+        real(c_double)     :: intg, intk, fval, scale
+
+        scale = 0.5_c_double * (b - a)
+        fval  = f(a + scale, args)
+        intk  = fval * K15(2,1) 
+        intg  = fval *  G7(2,1) 
+        do j = 2, 8
+            fval = f(a + scale * (1. - K15(1,j)) , args) + f(a + scale * (1. + K15(1,j)) , args)
+            intk = intk + fval * K15(2,j)
+            if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
+        end do
+        intk = scale * intk
+        intg = scale * intg
+        res  = intk
+        err  = abs(intk - intg)
+        
+    end subroutine integrate2
     
 end module zfunctions_mod
