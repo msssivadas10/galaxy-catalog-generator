@@ -1,5 +1,7 @@
 module halo_model_mod
-    !! Halo occupation distributions and related calculations.
+    !! Halo model calculations. These calculations are based on a 5-parameter 
+    !! halo occupation distribution (HOD) model. Includes routines for  
+    !! calculating halo averages and generating galaxy catalogs.
 
     use iso_fortran_env, only: stderr => error_unit
     use iso_c_binding
@@ -250,6 +252,11 @@ contains
         lam_sat    = satellite_count(params, args%lnm)
         args%n_sat = poisson_rv(rstate, lam_sat)
         
+        if ( params%scale_shmf < exp(params%lnm_min - args%lnm) ) then 
+            ! Halo mass correspond to an invalid satellite galaxy mass range: no satellites
+            args%n_sat = 0
+        end if
+
         ! Calculating halo concentration parameter
         args%c = halo_concentration(params, args%lnm, s_spline, ns)
 
@@ -269,12 +276,12 @@ contains
 
         real(c_double), intent(out) :: pos(:,:)
         !! Galaxy positions. Must have enough size for holding all the 
-        !! galaxies.
+        !! galaxies: i.e., shape=(3,n_cen + n_sat)
 
         real(c_double), intent(out) :: mass(:)
-        !! Galaxy masses.
+        !! Galaxy masses. Same size as pos (n_cen + n_sat)
 
-        integer(c_int64_t) :: i, n_sat
+        integer(c_int64_t) :: i
         real(c_double) :: m_halo, r_halo, c_halo, f, r, theta, phi, Ac, k1, k2, p
 
         if ( args%n_cen < 1 ) return ! No galaxies in this halo
@@ -289,27 +296,23 @@ contains
         mass(1)    = m_halo        ! in Msun
 
         if ( args%n_sat < 1 ) return ! No satellite galaxies in this halo
-
-        n_sat = 0 ! This is the actual number of satellite galaxies generated
         do i = 1, args%n_sat
             
-            ! Assigning random mass values to the satellite galaxies: 
-            ! These masses are drown from a bounded pareto distribution, 
-            ! with bounds [m_min, scale_shmf*m_halo] and slope given by 
-            ! slope_shmf. 
+            ! Assigning random mass values to the satellite galaxies: These masses 
+            ! are drown from a bounded pareto distribution, with bounds `m_min` and  
+            ! `scale_shmf*m_halo`, and slope given by slope_shmf.
+            !  
             ! NOTE: RVs are generated using inverse transform sampling 
             ! (<https://en.wikipedia.org/wiki/Pareto_distribution>)
             p  = -1._c_double / params%slope_shmf
-            k1 = exp(params%lnm_min - args%lnm)
+            k1 = exp( (params%lnm_min - args%lnm)*params%slope_shmf )
             k2 = params%scale_shmf**params%slope_shmf
-            if ( params%scale_shmf < k1 ) cycle ! Mass range is non existent: no satellites
-            k1 = k1**params%slope_shmf
             f  = ( ( k2 - (k2 - k1) * uniform_rv(rstate) ) / (k1*k2) )**p ! m_sat / m_halo
             
-            ! Generating random values corresponding to the distance of 
-            ! the galaxy from the halo center. These RVs should follow a 
-            ! distribution matching the NFW density profile of the halo. 
-            ! Sampling is done using the inverse transformation method. 
+            ! Generating random values corresponding to the distance of the galaxy 
+            ! from the halo center. These RVs should follow a distribution matching 
+            ! the NFW density profile of the halo. Sampling is done using the 
+            ! inverse transformation method. 
             Ac    = uniform_rv(rstate)*( log(1 + c_halo) - c_halo / (1 + c_halo) )
             r     = (r_halo / c_halo) * nfw_c(Ac)
             theta = acos( 2*uniform_rv(rstate) - 1 ) ! -pi to pi
@@ -323,9 +326,7 @@ contains
             ! Satellute galaxy mass in Msun
             mass(i+1) = mass(1) * f
 
-            n_sat = n_sat + 1
         end do
-        args%n_sat = n_sat ! replace with actual number satellites generated 
         
     end subroutine generate_satellites
 
