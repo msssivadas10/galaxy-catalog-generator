@@ -11,6 +11,7 @@ class BuildShared(build_ext):
             os.path.join("src", "utils",     "interpolate.f90"),
             os.path.join("src",               "zfunctions.f90"),
             os.path.join("src",               "rfunctions.f90"),
+            os.path.join("src",               "halo_model.f90"),
             os.path.join("src", "models", "power_spectrum.f90"),
             os.path.join("src", "models",  "mass_function.f90"),
             os.path.join("src", "models",      "halo_bias.f90"),
