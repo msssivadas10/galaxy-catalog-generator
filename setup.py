@@ -6,13 +6,14 @@ class BuildShared(build_ext):
     def run(self):
         # compile Fortran to shared lib manually
         files = [
-            os.path.join("src", "utils", "integrate.f90"),
-            os.path.join("src", "growthfactor.f90"),
-            os.path.join("src", "correlation.f90" ),
-            os.path.join("src", "variance.f90"    ),
+            os.path.join("src", "utils",          "random.f90"),
+            os.path.join("src", "utils",       "integrate.f90"),
+            os.path.join("src", "utils",     "interpolate.f90"),
+            os.path.join("src",               "zfunctions.f90"),
+            os.path.join("src",               "rfunctions.f90"),
             os.path.join("src", "models", "power_spectrum.f90"),
-            os.path.join("src", "models", "mass_function.f90" ),
-            os.path.join("src", "models", "halo_bias.f90"     ),
+            os.path.join("src", "models",  "mass_function.f90"),
+            os.path.join("src", "models",      "halo_bias.f90"),
         ]
         args = [ "-shared", "-fPIC", "-J", ".include" ]
         subprocess.check_call(

@@ -7,7 +7,7 @@ import ctypes
 # load the shared library
 lib = npct.load_library("libpowerspectrum", ".")
 
-class lgargs_t(ctypes.Structure):
+class zfargs_t(ctypes.Structure):
     _fields_ = [
         ('Om0'    , ctypes.c_double), 
         ('Ode0'   , ctypes.c_double),
@@ -21,7 +21,7 @@ class lgargs_t(ctypes.Structure):
 lib.linear_growth.argtypes = [
     ctypes.c_double, 
     ctypes.c_int, 
-    ctypes.POINTER(lgargs_t), 
+    ctypes.POINTER(zfargs_t), 
 ]
 lib.linear_growth.restype = ctypes.c_double
 linear_growth = np.vectorize(lib.linear_growth, excluded=[2])
@@ -153,7 +153,7 @@ lib.hbf_tinker10.restype  = ctypes.c_double
 
 ############################################################################################################
 
-args_gf = lgargs_t()
+args_gf = zfargs_t()
 args_gf.Om0     =  0.3
 args_gf.Ode0    =  0.7
 args_gf.w0      = -1.
@@ -246,7 +246,7 @@ lib.setup_hmf_tinker08(ctypes.byref(args_mf), 0, pktab, pktab.shape[0], pktab.sh
 #         args_mf.s = s[i]
 #         f[i]      = func(ctypes.byref(args_mf), -1) 
 #     plt.semilogx(s, f, 'o-', label = model)
-# plt.legend(title = 'halo massfunction)
+# plt.legend(title = 'halo massfunction')
 # plt.show()
 
 # s = np.logspace(-1, 3, 21)
