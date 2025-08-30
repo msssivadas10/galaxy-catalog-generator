@@ -168,8 +168,7 @@ contains
         integer(c_int), intent(out) :: stat
         !! Error code: 0=ok, 1=integral not converged
 
-        integer(c_int64_t) :: iter !, j
-        ! real(c_double)     :: intg, intk, fval, scale
+        integer(c_int64_t) :: iter 
         real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
         integer(c_int64_t) :: heap_size, heap_capacity
         real(c_double), allocatable :: heap(:, :)
