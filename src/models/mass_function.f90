@@ -103,7 +103,7 @@ contains
 
         real(c_double) :: lnr, rho_h, s2
 
-        args%rho_m = ( critical_density_const * args%H0**2 ) ! matter density at z=0 in Msun/Mpc^3 
+        args%rho_m = args%Om0 * ( critical_density_const * args%H0**2 ) ! matter density at z=0 in Msun/Mpc^3 
 
         ! Lagrangian radius (r) corresponding to halo mass
         rho_h = args%rho_m ! * args%Delta_m
