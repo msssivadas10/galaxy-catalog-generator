@@ -20,17 +20,12 @@ module random_mod
     real(c_double), parameter :: pi = 3.141592653589793_c_double
     !! Pi
 
-    type, public :: rstate_t
-        !! Random number generator state
-        integer(i64) :: state
-    end type
-
 contains
 
-    subroutine pcg32_init(self, seed)
+    subroutine pcg32_init(rstate, seed)
         !! Initialize a PCG32 random number generator.
 
-        type(rstate_t), intent(inout) :: self
+        integer(i64), intent(inout) :: rstate
         !! Random number generator state
 
         integer(i64), intent(in), value :: seed
@@ -38,28 +33,29 @@ contains
 
         integer(i32) :: rv
 
-        self%state = pcg32_inc + seed
-        rv = pcg32_random(self)
+        rstate = pcg32_inc + seed
+        rv     = pcg32_random(rstate)
         
     end subroutine pcg32_init
 
-    function pcg32_random(self) result(rword)
+    function pcg32_random(rstate) result(rword)
         !! Return a 32 bit random integer generated using PCG32 generator. 
         !! Range: -2147483648 to 2147483647 (i.e., 2^31 - 1)
 
-        type(rstate_t), intent(inout) :: self
+        integer(i64), intent(inout) :: rstate
+        !! Random number generator state
 
         integer(i32) :: rword
         integer(i64) :: state, rotation
         integer(i64), parameter :: mask32 = int(z'00000000ffffffff', kind=i64)
 
-        state  = self%state ! Current state
+        state  = rstate ! Current state
 
         ! Select a random rotation amount - bits 63-59 of the current state
         rotation = shiftr(state, 59)
 
         ! Update the state
-        self%state = state * pcg32_mul + pcg32_inc
+        rstate = state * pcg32_mul + pcg32_inc
 
         ! An xorshift mixes some high-order bits down
         state = xor(state, shiftr(state, 18)) 
@@ -70,10 +66,10 @@ contains
         
     end function pcg32_random
 
-    function uniform_rv(self) result(rv)
+    function uniform_rv(rstate) result(rv)
         !! Generate a uniform random number in [0, 1).
 
-        type(rstate_t), intent(inout) :: self
+        integer(i64), intent(inout) :: rstate !! Random number generator state
         real(c_double) :: rv
         
         real(c_double), parameter :: shift = 2147483648.0_c_double
@@ -81,14 +77,15 @@ contains
 
         ! PCG32 generates random integers in the range from -2147483648 to 
         ! 2147483647. This coverted to a float in 0 to 1 (not incl.) range.
-        rv = ( pcg32_random(self) + shift ) / scale
+        rv = ( pcg32_random(rstate) + shift ) / scale
 
     end function uniform_rv
 
-    function normal_rv(self, mu, std) result(rv)
+    function normal_rv(rstate, mu, std) result(rv)
         !! Generate a Normal random number.
 
-        type(rstate_t), intent(inout) :: self
+        integer(i64), intent(inout) :: rstate 
+        !! Random number generator state
 
         real(c_double), intent(in), value :: mu
         !! Mean
@@ -99,16 +96,17 @@ contains
         real(c_double) :: rv, u, v
 
         ! Random number generation using Box-Muller transform
-        u  = uniform_rv(self) ! in 0 to 1 range
-        v  = uniform_rv(self) ! in 0 to 1 range
+        u  = uniform_rv(rstate) ! in 0 to 1 range
+        v  = uniform_rv(rstate) ! in 0 to 1 range
         rv = mu + std * sqrt( -2*log(u) ) * cos( 2*pi*v ) ! normal random number
 
     end function normal_rv
     
-    function poisson_rv(self, lam) result(rv)
+    function poisson_rv(rstate, lam) result(rv)
         !! Generate a Poisson random number.
 
-        type(rstate_t), intent(inout) :: self
+        integer(i64), intent(inout) :: rstate 
+        !! Random number generator state
 
         real(c_double), intent(in), value :: lam
         !! Rate parameter
@@ -125,7 +123,7 @@ contains
             rv = 0
             do 
                rv = rv + 1
-               u  = uniform_rv(self) ! in 0 to 1 range
+               u  = uniform_rv(rstate) ! in 0 to 1 range
                p  = p*u
                if ( p <= c ) exit 
             end do
@@ -144,11 +142,11 @@ contains
             a = b * lam
             k = log(c) - lam - log(b)
             do 
-                u   = uniform_rv(self) ! in 0 to 1 range
+                u   = uniform_rv(rstate) ! in 0 to 1 range
                 x   = (a - log((1._c_double - u) / u)) / b
                 rv  = floor(x + 0.5_c_double)
                 if ( rv < 0 ) cycle
-                v   = uniform_rv(self) ! in 0 to 1 range
+                v   = uniform_rv(rstate) ! in 0 to 1 range
                 y   = a - b*x
                 lhs = y + log(v / (1._c_double + exp(y))**2)
                 rhs = k + rv*log(lam) - log_gamma(rv + 1._c_double)
@@ -158,8 +156,8 @@ contains
             ! For very large lam > 10^5, normal approximation is used. 
             ! Normal random number is generated using a Box-Muller 
             ! transform.
-            u  = uniform_rv(self) ! in 0 to 1 range
-            v  = uniform_rv(self) ! in 0 to 1 range
+            u  = uniform_rv(rstate) ! in 0 to 1 range
+            v  = uniform_rv(rstate) ! in 0 to 1 range
             k  = sqrt( -2*log(u) ) * cos( 2*pi*v ) ! std. normal random number
             x  = lam + sqrt(lam)*k + 0.5_c_double
             rv = max( 0_c_int64_t, int(x, kind=c_int64_t) )  
@@ -167,10 +165,11 @@ contains
         
     end function poisson_rv
 
-    function binomial_rv(self, n, p) result(rv)
+    function binomial_rv(rstate, n, p) result(rv)
         !! Generate a Binomial random number.
 
-        type(rstate_t), intent(inout) :: self
+        integer(i64), intent(inout) :: rstate 
+        !! Random number generator state
 
         integer(c_int64_t), intent(in), value :: n
         !! Number of trials
@@ -186,7 +185,7 @@ contains
             ! and O(n) complexity.
             rv = 0
             do i = 1, n
-                if ( uniform_rv(self) < p ) rv = rv + 1 
+                if ( uniform_rv(rstate) < p ) rv = rv + 1 
             end do
         else if ( n < 100000 ) then
             ! For medium n, use BTPE algorithm (Binomial Triangle-
@@ -197,8 +196,8 @@ contains
             s  = sqrt(np*q)
             f  = np + p
             do 
-                u = uniform_rv(self) - 0.5_c_double ! in -0.5 to 0.5 range
-                v = uniform_rv(self) ! in 0 to 1 range
+                u = uniform_rv(rstate) - 0.5_c_double ! in -0.5 to 0.5 range
+                v = uniform_rv(rstate) ! in 0 to 1 range
                 x = floor(np + s*( u / sqrt(v / (1._c_double - v)) ))
                 if (x < 0._c_double .or. x > n) cycle
                 y = x * log(np / x) + (n-p) * log((n - np) / (n - x)) 
@@ -212,8 +211,8 @@ contains
             q  = 1._c_double - p
             np = n*p        ! mean
             s  = sqrt(np*q) !std. deviation
-            u  = uniform_rv(self) ! in 0 to 1 range
-            v  = uniform_rv(self) ! in 0 to 1 range
+            u  = uniform_rv(rstate) ! in 0 to 1 range
+            v  = uniform_rv(rstate) ! in 0 to 1 range
             x  = np + s * sqrt( -2*log(u) ) * cos( 2*pi*v ) ! normal random number
             rv = max( 0_c_int64_t, min( n, int(x + 0.5_c_double, kind=c_int64_t) ) ) 
         end if
