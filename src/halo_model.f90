@@ -58,6 +58,9 @@ module halo_model_mod
         real(c_double) :: Om0
         !! Total matter density parameter
 
+        real(c_double) :: Delta_m
+        !! Matter overdensity w.r.to mean background density
+
         real(c_double) :: dplus
         !! Growth factor at this redshift
 
