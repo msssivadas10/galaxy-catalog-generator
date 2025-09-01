@@ -88,6 +88,9 @@ module halo_model_mod
         integer(c_int64_t) :: n_sat
         !! Number of satellite galaxies
 
+        integer(c_int64_t) :: rstate
+        !! Random number generator state
+
     end type
     
 contains
@@ -208,7 +211,7 @@ contains
 
 ! Galaxy Catalog Generation: 
     
-    subroutine setup_catalog_generation(params, args, rstate) bind(c)
+    subroutine setup_catalog_generation(params, args) bind(c)
         !! Calculate various parameters for a galaxy catalog generation
 
         type(hmargs_t), intent(in) :: params 
@@ -216,9 +219,6 @@ contains
 
         type(cgargs_t), intent(inout) :: args
         !! Arguments for catalog generation
-
-        integer(c_int64_t), intent(inout) :: rstate
-        !! Random number generator state
 
         real(c_double) :: rho_m, rho_h, p_cen, lam_sat
 
@@ -235,14 +235,14 @@ contains
         if ( abs(params%sigma_m) < 1e-08_c_double ) then
             args%n_cen = int(p_cen, kind=c_int64_t)
         else
-            args%n_cen = binomial_rv(rstate, 1_c_int64_t, p_cen)
+            args%n_cen = binomial_rv(args%rstate, 1_c_int64_t, p_cen)
         end if
         if ( args%n_cen < 1 ) return ! No central galaxies -> no satellites also 
 
         ! Satellite galaxy count: this drawn from a poisson distribution with the 
         ! calculated average.
         lam_sat    = satellite_count(params, args%lnm)
-        args%n_sat = poisson_rv(rstate, lam_sat)
+        args%n_sat = poisson_rv(args%rstate, lam_sat)
         
         if ( params%scale_shmf < exp(params%lnm_min - args%lnm) ) then 
             ! Halo mass correspond to an invalid satellite galaxy mass range: no satellites
@@ -254,7 +254,7 @@ contains
 
     end subroutine setup_catalog_generation
 
-    subroutine generate_satellites(params, args, rstate, pos, mass) bind(c)
+    subroutine generate_satellites(params, args, pos, mass) bind(c)
         !! Calculate various parameters for a galaxy catalog generation
 
         type(hmargs_t), intent(in) :: params 
@@ -262,9 +262,6 @@ contains
 
         type(cgargs_t), intent(inout) :: args
         !! Arguments for catalog generation
-
-        integer(c_int64_t), intent(inout) :: rstate
-        !! Random number generator state
 
         real(c_double), intent(out) :: pos(:,:)
         !! Galaxy positions. Must have enough size for holding all the 
@@ -299,16 +296,16 @@ contains
             p  = -1._c_double / params%slope_shmf
             k1 = exp( (params%lnm_min - args%lnm)*params%slope_shmf )
             k2 = params%scale_shmf**params%slope_shmf
-            f  = ( ( k2 - (k2 - k1) * uniform_rv(rstate) ) / (k1*k2) )**p ! m_sat / m_halo
+            f  = ( ( k2 - (k2 - k1) * uniform_rv(args%rstate) ) / (k1*k2) )**p ! m_sat / m_halo
             
             ! Generating random values corresponding to the distance of the galaxy 
             ! from the halo center. These RVs should follow a distribution matching 
             ! the NFW density profile of the halo. Sampling is done using the 
             ! inverse transformation method. 
-            Ac    = uniform_rv(rstate)*( log(1 + c_halo) - c_halo / (1 + c_halo) )
+            Ac    = uniform_rv(args%rstate)*( log(1 + c_halo) - c_halo / (1 + c_halo) )
             r     = (r_halo / c_halo) * nfw_c(Ac)
-            theta = acos( 2*uniform_rv(rstate) - 1 ) ! -pi to pi
-            phi   = 2*pi*uniform_rv(rstate)          !   0 to 2pi
+            theta = acos( 2*uniform_rv(args%rstate) - 1 ) ! -pi to pi
+            phi   = 2*pi*uniform_rv(args%rstate)          !   0 to 2pi
             
             ! Satellite galaxy coordinates x, y, and z in Mpc
             pos(1,i+1) = pos(1,1) + r*sin(theta)*cos(phi)
