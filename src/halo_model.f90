@@ -12,15 +12,21 @@ module halo_model_mod
 
     private
     public :: lagrangian_r, central_count, satellite_count, subhalo_mass_function,  &
-              halo_concentration, setup_catalog_generation, generate_satellites,    &
+              halo_concentration, setup_catalog_generation, generate_galaxies,    &
               average_halo_density, average_galaxy_density, average_satellite_frac, &
               average_galaxy_bias
 
     real(c_double), parameter :: delta_sc = 1.6864701998411453_c_double
     !! Overdensity threshold for spherical collapse in EdS universe
     
-    real(c_double), parameter :: critical_density_const = 2.775e+11_c_double
-    !! Constant part of the present critical density
+    real(c_double), parameter :: critical_density_const = 2.775366e+07_c_double
+    !! Constant part of the present critical density.
+    !  -- 
+    !  This value is calculated sung the relation for critical density at z=0, 
+    !  `rho_c = 3*H0^2/(8*pi*G)`, where, G=6.6743e-11 m^3/kg/s^2 and H0 has 
+    !  unit km/s/Mpc. Using 1 Mpc=3.085677e+22 m and Msun=1.9884099e+30 kg, 
+    !  this value can be calculated (I used values in `astropy.constants`
+    !  to calculate this value) 
     
     real(c_double), parameter :: pi = 3.141592653589793_c_double
     !! Pi
@@ -195,7 +201,7 @@ contains
         
         p   = args%slope_shmf ! power law index
         c   = p * a**p / (1._c_double - (a / b)**p) ! amplitude
-        res = c * x**(p - 1)
+        res = c * x**(-p - 1)
     
     end function subhalo_mass_function
 
@@ -209,20 +215,20 @@ contains
         real(c_double), intent(in), value :: sigma
         !! Matter variance corresponding to the halo mass
 
-        real(c_double) :: res, a, c0, b, g1, g2, v0, v, t
+        real(c_double) :: res, zp1, c0, b, g1, g2, v0, v, t
 
         ! Redshift dependent parameters:
-        a  = 1._c_double / (1._c_double + args%z)
-        c0 = 3.395_c_double * a**( 0.215_c_double )
-        b  = 0.307_c_double * a**(-0.540_c_double )
-        g1 = 0.628_c_double * a**( 0.047_c_double )
-        g2 = 0.317_c_double * a**( 0.893_c_double )
-        v0 = ( &
+        zp1 = (1._c_double + args%z)
+        c0  = 3.395_c_double * zp1**(-0.215_c_double )
+        b   = 0.307_c_double * zp1**( 0.540_c_double )
+        g1  = 0.628_c_double * zp1**(-0.047_c_double )
+        g2  = 0.317_c_double * zp1**(-0.893_c_double )
+        v0  = ( &
                 4.135_c_double                   &
-                    - 0.564_c_double   / a       &
-                    - 0.210_c_double   / a**2    &
-                    + 0.0557_c_double  / a**3    &
-                    - 0.00348_c_double / a**4    &
+                    - 0.564_c_double   * zp1     &
+                    - 0.210_c_double   * zp1**2  &
+                    + 0.0557_c_double  * zp1**3  &
+                    - 0.00348_c_double * zp1**4  &
              ) / args%dplus
         v  = delta_sc / sigma
         t  = v / v0
@@ -277,8 +283,8 @@ contains
 
     end subroutine setup_catalog_generation
 
-    subroutine generate_satellites(params, args, pos, mass) bind(c)
-        !! Calculate various parameters for a galaxy catalog generation
+    subroutine generate_galaxies(params, args, n, gdata) bind(c)
+        !! Generate galaxy positions and mass.
 
         type(hmargs_t), intent(in) :: params 
         !! Halo model parameters
@@ -286,12 +292,12 @@ contains
         type(cgargs_t), intent(inout) :: args
         !! Arguments for catalog generation
 
-        real(c_double), intent(out) :: pos(:,:)
-        !! Galaxy positions. Must have enough size for holding all the 
-        !! galaxies: i.e., shape=(3,n_cen + n_sat)
+        integer(c_int64_t), intent(in), value :: n
+        !! Size of the position and mass array: must be same total number 
+        !! of galaxies i.e., `(args%n_cen+args%n_sat)`.
 
-        real(c_double), intent(out) :: mass(:)
-        !! Galaxy masses. Same size as pos (n_cen + n_sat)
+        real(c_double), intent(out) :: gdata(4,n)
+        !! Galaxy positions (columns 1-3) and masses (column 4). 
 
         integer(c_int64_t) :: i
         real(c_double) :: m_halo, r_halo, c_halo, f, r, theta, phi, Ac, k1, k2, p
@@ -304,8 +310,8 @@ contains
 
         ! Halo has a central galaxy: the position and mass of this galaxy is same
         ! as that of the parent halo.
-        pos(1:3,1) = args%pos(1:3) ! in Mpc
-        mass(1)    = m_halo        ! in Msun
+        gdata(1:3,1) = args%pos(1:3) ! in Mpc
+        gdata(4  ,1) = m_halo        ! in Msun
 
         if ( args%n_sat < 1 ) return ! No satellite galaxies in this halo
         do i = 1, args%n_sat
@@ -331,16 +337,16 @@ contains
             phi   = 2*pi*uniform_rv(args%rstate)          !   0 to 2pi
             
             ! Satellite galaxy coordinates x, y, and z in Mpc
-            pos(1,i+1) = pos(1,1) + r*sin(theta)*cos(phi)
-            pos(2,i+1) = pos(2,1) + r*sin(theta)*sin(phi)
-            pos(3,i+1) = pos(3,1) + r*cos(theta)
+            gdata(1,i+1) = gdata(1,1) + r*sin(theta)*cos(phi)
+            gdata(2,i+1) = gdata(2,1) + r*sin(theta)*sin(phi)
+            gdata(3,i+1) = gdata(3,1) + r*cos(theta)
             
-            ! Satellute galaxy mass in Msun
-            mass(i+1) = mass(1) * f
+            ! Satellite galaxy mass in Msun
+            gdata(4,i+1) = gdata(4,1) * f
 
         end do
         
-    end subroutine generate_satellites
+    end subroutine generate_galaxies
 
     function nfw_c(a) result(res)
         !! Return the value of inverse to the NFW mass function. 
