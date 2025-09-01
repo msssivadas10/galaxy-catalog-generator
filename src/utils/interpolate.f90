@@ -9,7 +9,7 @@ module interpolate_mod
     
 contains
 
-    subroutine generate_cspline(n, spline)
+    subroutine generate_cspline(n, spline) bind(c)
         !! Generate a natural cubic spline for the points (x, y)
 
         integer(c_int64_t), intent(in), value :: n
@@ -76,7 +76,7 @@ contains
 
     end subroutine generate_cspline
 
-    function interpolate(x, n, spline) result(res)
+    function interpolate(x, n, spline) result(res) bind(c)
         !! Calculate the interpolated value using a natural cubic spline.
 
         real(c_double), intent(in), value :: x
