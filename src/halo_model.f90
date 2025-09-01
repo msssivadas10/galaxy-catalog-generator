@@ -11,9 +11,10 @@ module halo_model_mod
     implicit none
 
     private
-    public :: central_count, satellite_count, subhalo_mass_function,             &
-              halo_concentration, setup_catalog_generation, generate_satellites, &
-              average_halo_density, average_galaxy_density, average_satellite_frac
+    public :: central_count, satellite_count, subhalo_mass_function,                &
+              halo_concentration, setup_catalog_generation, generate_satellites,    &
+              average_halo_density, average_galaxy_density, average_satellite_frac, &
+              average_galaxy_bias
 
     real(c_double), parameter :: delta_sc = 1.6864701998411453_c_double
     !! Overdensity threshold for spherical collapse in EdS universe
@@ -73,7 +74,10 @@ module halo_model_mod
         !! Coordinates of the halo in Mpc units
 
         real(c_double) :: lnr
-        !! Hatural log of halo radius in Mpc
+        !! Natural log of halo radius in Mpc
+
+        real(c_double) :: s
+        !! Matter variance corresponding to this halo mass
 
         real(c_double) :: c
         !! Concentration parameter for the halo
@@ -169,21 +173,15 @@ contains
     
     end function subhalo_mass_function
 
-    function halo_concentration(args, lnm, s_spline, ns) result(res) bind(c)
+    function halo_concentration(args, sigma) result(res) bind(c)
         !! Return the value of halo concentration parameter for a given 
         !! mass, calculated for the current redshift.
 
         type(hmargs_t), intent(in) :: args
         !! Model parameter values
 
-        real(c_double), intent(in), value :: lnm
-        !! Natural log of halo mass (Msun)
-
-        real(c_double), intent(in) :: s_spline(3,ns)
-        !! Cubic spline for matter variance, as function of log(halo mass)
-
-        integer(c_int64_t), intent(in), value :: ns
-        !! Size of the matter variance spline data
+        real(c_double), intent(in) :: sigma
+        !! Matter variance corresponding to the halo mass
 
         real(c_double) :: res, a, c0, b, g1, g2, v0, v, t
 
@@ -200,7 +198,7 @@ contains
                     + 0.0557_c_double  / a**3    &
                     - 0.00348_c_double / a**4    &
              ) / args%dplus
-        v  = delta_sc / interpolate(lnm, ns, s_spline)
+        v  = delta_sc / sigma
         t  = v / v0
 
         ! Concentration-mass relation:
@@ -210,17 +208,11 @@ contains
 
 ! Galaxy Catalog Generation: 
     
-    subroutine setup_catalog_generation(params, s_spline, ns, args, rstate) bind(c)
+    subroutine setup_catalog_generation(params, args, rstate) bind(c)
         !! Calculate various parameters for a galaxy catalog generation
 
         type(hmargs_t), intent(in) :: params 
         !! Halo model parameters
-
-        real(c_double), intent(in) :: s_spline(3,ns)
-        !! Cubic spline for matter variance, as function of log(halo mass)
-
-        integer(c_int64_t), intent(in), value :: ns
-        !! Size of the matter variance spline data
 
         type(cgargs_t), intent(inout) :: args
         !! Arguments for catalog generation
@@ -258,7 +250,7 @@ contains
         end if
 
         ! Calculating halo concentration parameter
-        args%c = halo_concentration(params, args%lnm, s_spline, ns)
+        args%c = halo_concentration(params, args%s)
 
     end subroutine setup_catalog_generation
 
@@ -360,7 +352,7 @@ contains
 
 ! Halo averages:
 
-    function average_halo_density(args, lnma, lnmb, hmf_spline, ns, &
+    function average_halo_density(args, lnma, lnmb, mfspline, mfns, &
                                   abstol, reltol, maxiter         ) result(res) bind(c)
         !! Return the average halo number density for the given halo mass 
         !! range at current redshift.
@@ -374,11 +366,11 @@ contains
         real(c_double), intent(in), value :: lnmb
         !! Upper limit: natural log of halo mass (Msun)
 
-        real(c_double), intent(in) :: hmf_spline(3,ns)
+        real(c_double), intent(in) :: mfspline(3,mfns)
         !! Cubic spline for halo mass function, log(dn/dlnm) as function 
         !! of log(halo mass)
 
-        integer(c_int64_t), intent(in), value :: ns
+        integer(c_int64_t), intent(in), value :: mfns
         !! Size of the mass-function spline data
 
         real(c_double), intent(in), value :: abstol
@@ -390,18 +382,18 @@ contains
         integer(c_int64_t), intent(in), value :: maxiter
         !! Maximum number of iterations for calculating integral
 
-        real(c_double) :: res, err 
+        real(c_double) :: res, err, empty(3, 0) 
         integer(c_int) :: stat
         
-        call calc_halo_average(0, lnma, lnmb, args, hmf_spline, ns,    &
-                               abstol, reltol, maxiter, res, err, stat &
+        call calc_halo_average(0, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
+                               abstol, reltol, maxiter, res, err, stat                  &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_halo_density: integral failed to converge'
         
     end function average_halo_density
 
-    function average_galaxy_density(args, lnma, lnmb, hmf_spline, ns, &
+    function average_galaxy_density(args, lnma, lnmb, mfspline, mfns, &
                                     abstol, reltol, maxiter         ) result(res) bind(c)
         !! Return the average galaxy number density for the given halo mass 
         !! range at current redshift.
@@ -415,11 +407,11 @@ contains
         real(c_double), intent(in), value :: lnmb
         !! Upper limit: natural log of halo mass (Msun)
 
-        real(c_double), intent(in) :: hmf_spline(3,ns)
+        real(c_double), intent(in) :: mfspline(3,mfns)
         !! Cubic spline for halo mass function, log(dn/dlnm) as function 
         !! of log(halo mass)
 
-        integer(c_int64_t), intent(in), value :: ns
+        integer(c_int64_t), intent(in), value :: mfns
         !! Size of the mass-function spline data
 
         real(c_double), intent(in), value :: abstol
@@ -431,19 +423,19 @@ contains
         integer(c_int64_t), intent(in), value :: maxiter
         !! Maximum number of iterations for calculating integral
 
-        real(c_double) :: res, res1, res2, err 
+        real(c_double) :: res, res1, res2, err, empty(3, 0) 
         integer(c_int) :: stat
         
         ! Average central galaxy density
-        call calc_halo_average(1, lnma, lnmb, args, hmf_spline, ns,    &
-                               abstol, reltol, maxiter, res1, err, stat &
+        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
+                               abstol, reltol, maxiter, res1, err, stat                 &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_density: integral (c) failed to converge'
         
         ! Average satellite galaxy density
-        call calc_halo_average(2, lnma, lnmb, args, hmf_spline, ns,    &
-                               abstol, reltol, maxiter, res2, err, stat &
+        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
+                               abstol, reltol, maxiter, res2, err, stat                 &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_density: integral (s) failed to converge'
@@ -453,7 +445,7 @@ contains
 
     end function average_galaxy_density
 
-    function average_satellite_frac(args, lnma, lnmb, hmf_spline, ns, &
+    function average_satellite_frac(args, lnma, lnmb, mfspline, mfns, &
                                     abstol, reltol, maxiter         ) result(res) bind(c)
         !! Return the average satellite fraction for the given halo mass 
         !! range at current redshift.
@@ -467,11 +459,11 @@ contains
         real(c_double), intent(in), value :: lnmb
         !! Upper limit: natural log of halo mass (Msun)
 
-        real(c_double), intent(in) :: hmf_spline(3,ns)
+        real(c_double), intent(in) :: mfspline(3,mfns)
         !! Cubic spline for halo mass function, log(dn/dlnm) as function 
         !! of log(halo mass)
 
-        integer(c_int64_t), intent(in), value :: ns
+        integer(c_int64_t), intent(in), value :: mfns
         !! Size of the mass-function spline data
 
         real(c_double), intent(in), value :: abstol
@@ -483,31 +475,103 @@ contains
         integer(c_int64_t), intent(in), value :: maxiter
         !! Maximum number of iterations for calculating integral
 
-        real(c_double) :: res, res1, res2, err 
+        real(c_double) :: res, res1, res2, err, empty(3, 0) 
         integer(c_int) :: stat
         
         ! Average central galaxy density
-        call calc_halo_average(1, lnma, lnmb, args, hmf_spline, ns,    &
-                               abstol, reltol, maxiter, res1, err, stat &
+        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
+                               abstol, reltol, maxiter, res1, err, stat                 &
         )
         if ( stat /= 0 ) &
-            write(stderr,'(a)') 'warning: average_galaxy_density: integral (c) failed to converge'
+            write(stderr,'(a)') 'warning: average_satellite_frac: integral (c) failed to converge'
         
         ! Average satellite galaxy density
-        call calc_halo_average(2, lnma, lnmb, args, hmf_spline, ns,    &
-                               abstol, reltol, maxiter, res2, err, stat &
+        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
+                               abstol, reltol, maxiter, res2, err, stat                 &
         )
         if ( stat /= 0 ) &
-            write(stderr,'(a)') 'warning: average_galaxy_density: integral (s) failed to converge'
+            write(stderr,'(a)') 'warning: average_satellite_frac: integral (s) failed to converge'
 
         ! Average satellite fraction
         res = res2 / (res1 + res2)
         
     end function average_satellite_frac
 
-    subroutine calc_halo_average(f, a, b, args, hmf_spline, ns, &
+    function average_galaxy_bias(args, lnma, lnmb, mfspline, mfns, bfspline,  &
+                                 bfns, abstol, reltol, maxiter             ) result(res) bind(c)
+        !! Return the average satellite fraction for the given halo mass 
+        !! range at current redshift.
+
+        type(hmargs_t), intent(in) :: args
+        !! Model parameter values
+
+        real(c_double), intent(in), value :: lnma
+        !! Lower limit: natural log of halo mass (Msun)
+
+        real(c_double), intent(in), value :: lnmb
+        !! Upper limit: natural log of halo mass (Msun)
+
+        real(c_double), intent(in) :: mfspline(3,mfns)
+        !! Cubic spline for halo mass function, log(dn/dlnm) as function 
+        !! of log(halo mass)
+
+        integer(c_int64_t), intent(in), value :: mfns
+        !! Size of the mass-function spline data
+
+        real(c_double), intent(in) :: bfspline(3,bfns)
+        !! Bias spline
+
+        integer(c_int64_t), intent(in), value :: bfns
+        !! Size of the bias spline
+
+        real(c_double), intent(in), value :: abstol
+        !! Absolute tolerance
+
+        real(c_double), intent(in), value :: reltol
+        !! Relative tolerance
+
+        integer(c_int64_t), intent(in), value :: maxiter
+        !! Maximum number of iterations for calculating integral
+
+        real(c_double) :: res, res1, res2, res3, res4, err, empty(3, 0)
+        integer(c_int) :: stat
+
+        ! Average central galaxy density
+        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
+                               abstol, reltol, maxiter, res1, err, stat                 &
+        )
+        if ( stat /= 0 ) &
+            write(stderr,'(a)') 'warning: average_galaxy_bias: integral (c) failed to converge'
+
+        ! Average satellite galaxy density
+        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
+                               abstol, reltol, maxiter, res2, err, stat                 &
+        )
+        if ( stat /= 0 ) &
+            write(stderr,'(a)') 'warning: average_galaxy_bias: integral (s) failed to converge'
+
+        ! Average central galaxy bias
+        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, bfspline, bfns, &
+                               abstol, reltol, maxiter, res3, err, stat             &
+        )
+        if ( stat /= 0 ) &
+        write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bc) failed to converge'
+
+        ! Average satellite galaxy bias
+        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, bfspline, bfns, &
+                               abstol, reltol, maxiter, res4, err, stat             &
+        )
+        if ( stat /= 0 ) &
+        write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bs) failed to converge'
+
+        ! Average galaxy bias
+        res = (res3 + res4) / (res1 + res2)
+
+        end function average_galaxy_bias
+
+    subroutine calc_halo_average(f, a, b, args, mfspline, mfns, bfspline, bfns, &
                                  abstol, reltol, maxiter, res, err, stat)
-        !! Calculate the integral of a scalar function f(x) over the interval [a, b]. 
+        !! Calculate the halo average with optional bias weight. 
 
         integer(c_int), intent(in), value :: f
         !! Function selector (0=no weight, 1=central count, 2=satellite count)
@@ -521,11 +585,17 @@ contains
         type(hmargs_t), intent(in) :: args
         !! Model parameter values
 
-        real(c_double), intent(in) :: hmf_spline(3,ns)
+        real(c_double), intent(in) :: mfspline(3,mfns)
         !! Mass-function spline
 
-        integer(c_int64_t), intent(in), value :: ns
+        integer(c_int64_t), intent(in), value :: mfns
         !! Size of the mass-function spline
+
+        real(c_double), intent(in) :: bfspline(3,bfns)
+        !! Bias spline
+
+        integer(c_int64_t), intent(in), value :: bfns
+        !! Size of the bias spline
 
         real(c_double), intent(in), value :: abstol
         !! Absolute tolerance
@@ -555,7 +625,9 @@ contains
         allocate( heap(4, heap_capacity) )
 
         ! Initial evaluation
-        call calc_halo_average2(f, a, b, args, hmf_spline, ns, I0, err0)
+        call calc_halo_average2(f, a, b, args, mfspline, mfns, &
+                                bfspline, bfns, I0, err0       &
+        )
         call int_heap_push(heap, heap_size, heap_capacity, a, b, I0, err0)
 
         res  = I0
@@ -575,11 +647,15 @@ contains
             xm = 0.5_c_double * (xa + xb)
             
             ! Refine on left interval
-            call calc_halo_average2(f, xa, xm, args, hmf_spline, ns, I1, err1)
+            call calc_halo_average2(f, xa, xm, args, mfspline, mfns, &
+                                    bfspline, bfns, I1, err1         &
+            )
             call int_heap_push(heap, heap_size, heap_capacity, xa, xm, I1, err1) ! Push new interval back
             
             ! Refine on left interval
-            call calc_halo_average2(f, xm, xb, args, hmf_spline, ns, I2, err2)
+            call calc_halo_average2(f, xm, xb, args, mfspline, mfns, &
+                                    bfspline, bfns, I2, err2         &
+            )
             call int_heap_push(heap, heap_size, heap_capacity, xm, xb, I2, err2) ! Push new interval back
             
             ! Update global sums
@@ -592,8 +668,8 @@ contains
         
     end subroutine calc_halo_average
 
-    subroutine calc_halo_average2(f, a, b, args, hmf_spline, ns, res, err)
-        !! Calculate the integral of a scalar function f(x) over the interval [a, b]. 
+    subroutine calc_halo_average2(f, a, b, args, mfspline, mfns, bfspline, bfns, res, err)
+        !! Calculate the halo average with optional bias weight in the interval [a, b]. 
 
         integer(c_int), intent(in), value :: f
         !! Function selector (0=no weight, 1=central count, 2=satellite count)
@@ -607,11 +683,17 @@ contains
         type(hmargs_t), intent(in) :: args
         !! Model parameter values
 
-        real(c_double), intent(in) :: hmf_spline(3,ns)
+        real(c_double), intent(in) :: mfspline(3,mfns)
         !! Mass-function spline
 
-        integer(c_int64_t), intent(in), value :: ns
+        integer(c_int64_t), intent(in), value :: mfns
         !! Size of the mass-function spline
+
+        real(c_double), intent(in) :: bfspline(3,bfns)
+        !! Bias spline
+
+        integer(c_int64_t), intent(in), value :: bfns
+        !! Size of the bias spline
 
         real(c_double), intent(out) :: res
         !! Value of the integral of f over [a, b]
@@ -624,7 +706,8 @@ contains
 
         scale = 0.5_c_double * (b - a)
         xval  = a + scale ! log(m)
-        fval  = exp( interpolate(xval, ns, hmf_spline) ) ! dn/dlnm
+        fval  = exp( interpolate(xval, mfns, mfspline) ) ! dn/dlnm
+        if ( bfns > 0 ) fval = fval * exp( interpolate(xval, bfns, bfspline) ) ! bias
         select case ( f )
         case ( 1 ) ! weight=central galaxy count
             fval = fval * central_count(args, xval)
@@ -637,7 +720,8 @@ contains
         do j = 2, 8
 
             xval = a + scale * (1. - K15(1,j)) ! log(m)
-            fval = exp( interpolate(xval, ns, hmf_spline) ) ! dn/dlnm
+            fval = exp( interpolate(xval, mfns, mfspline) ) ! dn/dlnm
+            if ( bfns > 0 ) fval = fval * exp( interpolate(xval, bfns, bfspline) ) ! bias
             select case ( f )
             case ( 1 ) ! weight=central galaxy count
                 fval = fval * central_count(args, xval)
@@ -647,7 +731,8 @@ contains
             end select 
 
             xval  = a + scale * (1. + K15(1,j)) ! log(m)
-            fval2 = exp( interpolate(xval, ns, hmf_spline) ) ! dn/dlnm
+            fval2 = exp( interpolate(xval, mfns, mfspline) ) ! dn/dlnm
+            if ( bfns > 0 ) fval2 = fval2 * exp( interpolate(xval, bfns, bfspline) ) ! bias
             select case ( f )
             case ( 1 ) ! weight=central galaxy count
                 fval2 = fval2 * central_count(args, xval)
@@ -655,8 +740,8 @@ contains
                 fval2 = fval2 * satellite_count(args, xval)
             ! default=no weight
             end select 
-            
             fval = fval + fval2
+            
             intk = intk + fval * K15(2,j)
             if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
         end do
