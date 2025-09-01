@@ -275,7 +275,7 @@ class PowerSpectrum( ABC ):
         
         # -- Spectral moment calculation: 
         if nu == 0:
-            retval = integrateVectorized(lnr, j, self.settings.windowfunc)
+            retval = integrateVectorized(lnr, j, self.settings.windowfunc) / (2*np.pi**2)
             if normalize: # using the sigma-8 parameter value...
                 retval = self.sigma8**2 * retval
             return retval
