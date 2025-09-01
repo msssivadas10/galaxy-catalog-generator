@@ -11,7 +11,7 @@ module halo_model_mod
     implicit none
 
     private
-    public :: central_count, satellite_count, subhalo_mass_function,                &
+    public :: lagrangian_r, central_count, satellite_count, subhalo_mass_function,  &
               halo_concentration, setup_catalog_generation, generate_satellites,    &
               average_halo_density, average_galaxy_density, average_satellite_frac, &
               average_galaxy_bias
@@ -97,6 +97,26 @@ module halo_model_mod
     end type
     
 contains
+
+    function lagrangian_r(args, lnm) result(lnr) bind(c)
+        !! Return the Lagrangian radius a halo (natural log of value in Mpc), 
+        !! given its mass. 
+
+        type(hmargs_t), intent(in) :: args
+        !! Model parameter values
+
+        real(c_double), intent(in), value :: lnm
+        !! Natural log of halo mass (Msun)
+
+        real(c_double) :: lnr, rho_m, rho_h
+
+        rho_m = args%Om0 * ( critical_density_const * args%H0**2 ) ! Matter density at z=0 in Msun/Mpc^3 
+        rho_h = rho_m ! Halo density (TODO: chek if the halo density is rho_m * self.Delta)
+
+        ! Lagrangian radius (r) corresponding to halo mass
+        lnr = ( lnm + log(3._c_double / (4*pi) / rho_h ) ) / 3._c_double ! r in Mpc
+        
+    end function lagrangian_r
 
     function central_count(args, lnm) result(res) bind(c)
         !! Return the average count of central galaxies in a halo, given its 
