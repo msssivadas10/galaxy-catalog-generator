@@ -88,7 +88,7 @@ module halo_model_mod
         integer(c_int64_t) :: n_sat
         !! Number of satellite galaxies
 
-    end type cgargs_t
+    end type
     
 contains
 
