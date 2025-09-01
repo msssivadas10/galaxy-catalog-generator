@@ -186,7 +186,7 @@ contains
         type(hmargs_t), intent(in) :: args
         !! Model parameter values
 
-        real(c_double), intent(in) :: sigma
+        real(c_double), intent(in), value :: sigma
         !! Matter variance corresponding to the halo mass
 
         real(c_double) :: res, a, c0, b, g1, g2, v0, v, t
