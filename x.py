@@ -163,10 +163,6 @@ class hmargs_t(ctypes.Structure):
         ('z'         , ctypes.c_double),
         ('H0'        , ctypes.c_double),
         ('Om0'       , ctypes.c_double),
-        ('Om0'       , ctypes.c_double), 
-        ('Ode0'      , ctypes.c_double),
-        ('w0'        , ctypes.c_double),
-        ('wa'        , ctypes.c_double),
         ('Delta_m'   , ctypes.c_double),
         ('dplus'     , ctypes.c_double),
     ]        
@@ -348,9 +344,6 @@ args_hm.slope_shmf = 2.
 args_hm.z          = args_ps.z
 args_hm.H0         = 100.0*args_ps.h
 args_hm.Om0        = args_gf.Om0
-args_hm.Ode0       = args_gf.Ode0
-args_hm.w0         = args_gf.w0  
-args_hm.wa         = args_gf.wa  
 args_hm.Delta_m    = 200.
 args_hm.dplus      = (args_ps.dplus_z / args_ps.dplus_0)
 
