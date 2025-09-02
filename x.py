@@ -169,14 +169,16 @@ class hmargs_t(ctypes.Structure):
 
 class cgargs_t(ctypes.Structure):
     _fields_ = [
-        ('lnm'   , ctypes.c_double  ), 
-        ('pos'   , ctypes.c_double*3),
-        ('lnr'   , ctypes.c_double  ),
-        ('s'     , ctypes.c_double  ),
-        ('c'     , ctypes.c_double  ),
-        ('n_cen' , ctypes.c_int64   ),
-        ('n_sat' , ctypes.c_int64   ),
-        ('rstate', ctypes.c_int64   ),
+        ('lnm'    , ctypes.c_double  ), 
+        ('pos'    , ctypes.c_double*3),
+        ('lnr'    , ctypes.c_double  ),
+        ('s'      , ctypes.c_double  ),
+        ('c'      , ctypes.c_double  ),
+        ('n_cen'  , ctypes.c_int64   ),
+        ('n_sat'  , ctypes.c_int64   ),
+        ('rstate' , ctypes.c_int64   ),
+        ('boxsize', ctypes.c_double*3),
+        ('offset' , ctypes.c_double*3),
     ]
 
 lib.lagrangian_r.argtypes = [ ctypes.POINTER(hmargs_t), ctypes.c_double ]

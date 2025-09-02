@@ -100,6 +100,14 @@ module halo_model_mod
         integer(c_int64_t) :: rstate
         !! Random number generator state
 
+        real(c_double) :: boxsize(3)
+        !! Size of the bounding box containing all the halos in the 
+        !! simulation. Used for periodic wrapping galaxy position.
+
+        real(c_double) :: offset(3)
+        !! Coordinates of the bottom-lower-left corner of the bounding 
+        !! box. Used for periodic wrapping galaxy position.
+
     end type
     
 contains
@@ -340,6 +348,8 @@ contains
             gdata(1,i+1) = gdata(1,1) + r*sin(theta)*cos(phi)
             gdata(2,i+1) = gdata(2,1) + r*sin(theta)*sin(phi)
             gdata(3,i+1) = gdata(3,1) + r*cos(theta)
+            ! Periodic wrapping of coordinates to stay within the bounding box
+            call periodic_wrap( gdata(1:3,i+1), args%offset(1:3), args%boxsize(1:3) )
             
             ! Satellite galaxy mass in Msun
             gdata(4,i+1) = gdata(4,1) * f
@@ -347,6 +357,21 @@ contains
         end do
         
     end subroutine generate_galaxies
+
+    elemental subroutine periodic_wrap(x, offset, width)
+        !! Periodicall wrap the value to the interval [offset, offset+width] 
+        real(c_double), intent(inout) :: x
+        real(c_double), intent(in)    :: offset, width
+
+        ! If width <= 0, then no wrapping is done: this can be used for forcing 
+        ! no wrapping, if needed...
+        if ( width > 0. ) then
+            ! Using `modulo` (for mathematical modulo) instead of `mod` function
+            ! (remainder of a division)
+            x = offset + modulo(x - offset, width)
+        end if
+
+    end subroutine periodic_wrap
 
     function nfw_c(a) result(res)
         !! Return the value of inverse to the NFW mass function. 
