@@ -64,6 +64,15 @@ module halo_model_mod
         real(c_double) :: Om0
         !! Total matter density parameter
 
+        real(c_double) :: Ode0
+        !! Dark energy density parameter
+
+        real(c_double) :: w0
+        !! Present value of the dark energy equation of state, w
+        
+        real(c_double) :: wa
+        !! A measure of how w evolves with time
+
         real(c_double) :: Delta_m
         !! Matter overdensity w.r.to mean background density
 
