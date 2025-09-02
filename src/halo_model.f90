@@ -404,7 +404,8 @@ contains
 ! Halo averages:
 
     function average_halo_density(args, lnma, lnmb, mfspline, mfns, &
-                                  abstol, reltol, maxiter         ) result(res) bind(c)
+                                  abstol, reltol, maxiter           &
+        ) result(res) bind(c)
         !! Return the average halo number density for the given halo mass 
         !! range at current redshift.
 
@@ -445,7 +446,8 @@ contains
     end function average_halo_density
 
     function average_galaxy_density(args, lnma, lnmb, mfspline, mfns, &
-                                    abstol, reltol, maxiter         ) result(res) bind(c)
+                                    abstol, reltol, maxiter           &
+        ) result(res) bind(c)
         !! Return the average galaxy number density for the given halo mass 
         !! range at current redshift.
 
@@ -497,7 +499,8 @@ contains
     end function average_galaxy_density
 
     function average_satellite_frac(args, lnma, lnmb, mfspline, mfns, &
-                                    abstol, reltol, maxiter         ) result(res) bind(c)
+                                    abstol, reltol, maxiter           &
+        ) result(res) bind(c)
         !! Return the average satellite fraction for the given halo mass 
         !! range at current redshift.
 
@@ -548,8 +551,9 @@ contains
         
     end function average_satellite_frac
 
-    function average_galaxy_bias(args, lnma, lnmb, mfspline, mfns, bfspline,  &
-                                 bfns, abstol, reltol, maxiter             ) result(res) bind(c)
+    function average_galaxy_bias(args, lnma, lnmb, mfspline, mfns, bfspline, &
+                                 bfns, abstol, reltol, maxiter               &
+        ) result(res) bind(c)
         !! Return the average satellite fraction for the given halo mass 
         !! range at current redshift.
 
@@ -621,7 +625,8 @@ contains
         end function average_galaxy_bias
 
     subroutine calc_halo_average(f, a, b, args, mfspline, mfns, bfspline, bfns, &
-                                 abstol, reltol, maxiter, res, err, stat)
+                                 abstol, reltol, maxiter, res, err, stat        &
+        )
         !! Calculate the halo average with optional bias weight. 
 
         integer(c_int), intent(in), value :: f
@@ -719,8 +724,11 @@ contains
         
     end subroutine calc_halo_average
 
-    subroutine calc_halo_average2(f, a, b, args, mfspline, mfns, bfspline, bfns, res, err)
-        !! Calculate the halo average with optional bias weight in the interval [a, b]. 
+    subroutine calc_halo_average2(f, a, b, args, mfspline, mfns, bfspline, &
+                                  bfns, res, err                           &
+        )
+        !! Calculate the halo average with optional bias weight in the 
+        !! interval [a, b]. 
 
         integer(c_int), intent(in), value :: f
         !! Function selector (0=no weight, 1=central count, 2=satellite count)
