@@ -40,7 +40,7 @@ contains
         !! 3=Weights for integration.
         
         integer(c_int64_t), intent(in), value :: size
-        !! Size of the power spectrum table: must be a multiple of 7.
+        !! Size of the power spectrum table.
 
         integer(c_int), intent(in), value :: cls
         !! Columns of the power spectrum table: must be 2 or 3. If 3, use the 
@@ -129,7 +129,7 @@ contains
         !! interval can be stacked together, for more accuracy. 
 
         integer(c_int64_t), intent(in), value :: size
-        !! Size of the power spectrum table: must be a multiple of 7.
+        !! Size of the power spectrum table.
 
         integer(c_int), intent(in), value :: cls
         !! Columns of the power spectrum table: must be 2 or 3. If 3, use the 
