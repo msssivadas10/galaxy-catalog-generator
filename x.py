@@ -7,6 +7,20 @@ import ctypes
 # load the shared library
 lib = npct.load_library("libpowerspectrum", ".")
 
+lib.generate_cspline.argtypes = [
+    ctypes.c_int64, 
+    np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags='C_CONTIGUOUS'),      
+]
+lib.generate_cspline.restype = None
+
+lib.interpolate.argtypes = [
+    ctypes.c_double,
+    ctypes.c_int64, 
+    np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags='C_CONTIGUOUS'),      
+]
+lib.interpolate.restype = ctypes.c_double
+interpolate = np.vectorize(lib.interpolate, excluded=[1, 2])
+
 class zfargs_t(ctypes.Structure):
     _fields_ = [
         ('Om0'    , ctypes.c_double), 
@@ -214,6 +228,20 @@ lib.generate_galaxies.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags='C_CONTIGUOUS'), 
 ]
 lib.generate_galaxies.restype = None
+
+halodata_t = np.dtype([('id', 'i8'), ('pos', 'f8', 3), ('mass', 'f8')])
+lib.generate_galaxy_catalog.argtypes = [
+    np.ctypeslib.ndpointer(dtype=halodata_t, ndim=1, flags='C_CONTIGUOUS'), 
+    ctypes.c_int64,      
+    np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags='C_CONTIGUOUS'),      
+    ctypes.c_int64,      
+    ctypes.POINTER(hmargs_t),      
+    np.ctypeslib.ndpointer(dtype=np.float64, ndim=2, flags='C_CONTIGUOUS'),      
+    ctypes.c_int64,      
+    ctypes.c_int64,      
+    ctypes.c_int,      
+]
+lib.generate_galaxy_catalog.restype = None
 
 lib.average_halo_density.argtypes = [
     ctypes.POINTER(hmargs_t), 
@@ -480,6 +508,67 @@ def test_galaxy_generation():
     plt.loglog(centers, rho_theory, label='Theory')
     plt.show()
 
+def test_galaxy_generation2():
+    sigma = np.zeros((101, 3))
+    sigma[:,0] = np.linspace(np.log(1e+08), np.log(1e+16), sigma.shape[0])
+    sigma[:,2] = lagrangian_r(ctypes.byref(args_hm), sigma[:,0])
+    sigma[:,1] = variance(sigma[:,2], 0, 0, 0, pktab, pktab.shape[0], pktab.shape[1])
+    sigma[:,1] = np.log(sigma[:,1]) / 2.
+    lib.generate_cspline(sigma.shape[0], sigma)
+
+    bbox = np.array([[-100., -100., -100.], 
+                     [ 100.,  100.,  100.]])
+
+    rng = np.random.default_rng(12345)
+
+    m_halo = 1e+14
+    hcat   = np.zeros((20_000,), dtype=halodata_t)
+    hcat['id']   = np.arange(hcat.shape[0]) + 1
+    hcat['mass'] = m_halo
+    hcat['pos']  = rng.uniform(bbox[0,:], bbox[1,:], (hcat.shape[0], 3))
+    # print(hcat)
+
+    fid = 0
+    lib.generate_galaxy_catalog( hcat, hcat.shape[0], sigma, sigma.shape[0], ctypes.byref(args_hm), bbox, 123456, fid, 4 )
+
+    galdata_t = np.dtype([('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8'), ('typ', 'S1')])
+    gcat = np.fromfile(f'{fid}.dat', dtype=galdata_t)
+    # print(gcat)
+    # print(gcat.shape)
+
+    mask      = gcat['typ'] == b'c'
+    central   = gcat[mask]
+    satellite = gcat[~mask]
+
+    halo_map   = { key: index for index, key in enumerate(central['id']) }
+    halo_order = [ halo_map[key] for key in satellite['id'] ]
+    bsize  = bbox[1,:] - bbox[0,:]
+    rdist  = central[halo_order]['pos'] - satellite['pos']
+    rdist -= bsize * np.rint(rdist / bsize)
+    rdist  = np.sqrt(np.sum(rdist**2, axis=-1))
+    r_vir  = np.exp( lagrangian_r(ctypes.byref(args_hm), np.log(m_halo)) )
+    s      = np.exp( interpolate(np.log(m_halo), sigma.shape[0], sigma) )
+    c      = halo_concentration(ctypes.byref(args_hm), s)
+    rs     = r_vir / c
+    bins   = np.logspace(np.log10(1e-3*r_vir), np.log10(r_vir), 50)
+    hist, edges = np.histogram(rdist, bins=bins, density=True)
+    centers     = 0.5*(edges[1:] + edges[:-1])
+    rho_theory  = 1/(centers/rs*(1+centers/rs)**2)
+    rho_theory /= np.trapz(rho_theory*centers**2, centers) # normalize
+    plt.loglog(centers, hist, label='Sampled')
+    plt.loglog(centers, rho_theory*centers**2, label='Theory')
+    plt.show()
+
+    msat = satellite['mass'] 
+    bins = np.logspace(np.log10(1e-3*m_halo), np.log10(m_halo), 50)
+    hist, edges = np.histogram(msat, bins=bins, density=True)
+    centers = 0.5*(edges[1:] + edges[:-1])
+    rho_theory = subhalo_mass_function(ctypes.byref(args_hm), centers/m_halo, np.log(m_halo))
+    rho_theory /= np.trapz(rho_theory, centers) # normalize
+    plt.loglog(centers, hist, label='Sampled')
+    plt.loglog(centers, rho_theory, label='Theory')
+    plt.show()
+
 if __name__ == '__main__':
     test_linear_growth()
     test_power_spectrum()
@@ -491,3 +580,4 @@ if __name__ == '__main__':
     test_shmf()
     test_halo_concentration()
     test_galaxy_generation()
+    test_galaxy_generation2()
