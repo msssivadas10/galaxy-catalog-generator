@@ -15,8 +15,9 @@ class BuildShared(build_ext):
             os.path.join("src", "models", "power_spectrum.f90"),
             os.path.join("src", "models",  "mass_function.f90"),
             os.path.join("src", "models",      "halo_bias.f90"),
+            os.path.join("src",           "galaxy_catalog.f90"),
         ]
-        args = [ "-shared", "-fPIC", "-J", ".include" ]
+        args = [ "-shared", "-fPIC", "-J", ".include", "-fopenmp" ]
         subprocess.check_call(
             ["gfortran", *args, *files, "-o", "libpowerspectrum.so"]
         )
