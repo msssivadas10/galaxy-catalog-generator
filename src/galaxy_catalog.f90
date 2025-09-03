@@ -118,7 +118,7 @@ contains
 
             ! Copy halo data to local args
             args%pos(1:3) = hcat(i)%pos(1:3)    ! position
-            args%lnm      = exp( hcat(i)%mass ) ! mass
+            args%lnm      = log( hcat(i)%mass ) ! mass
             args%s        = exp( interpolate(args%lnm, ns, sigma) ) ! matter variance
 
             ! Setting up 
