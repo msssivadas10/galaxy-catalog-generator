@@ -1,4 +1,4 @@
-from setuptools import setup, Extension
+from setuptools import setup
 from setuptools.command.build_ext import build_ext
 import os, os.path, subprocess
 
@@ -7,6 +7,7 @@ class BuildShared(build_ext):
         # compile Fortran to shared lib manually
         files = [
             os.path.join("src", "utils",          "random.f90"),
+            os.path.join("src", "utils",       "constants.f90"),
             os.path.join("src", "utils",       "integrate.f90"),
             os.path.join("src", "utils",     "interpolate.f90"),
             os.path.join("src",               "zfunctions.f90"),
