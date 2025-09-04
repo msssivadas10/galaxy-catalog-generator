@@ -6,6 +6,7 @@ module halo_bias_mod
     !! function model, and then call the bias setup routine (if any)
 
     use iso_c_binding
+    use constants_mod
     use mass_function_mod
     implicit none
 
