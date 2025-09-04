@@ -657,14 +657,14 @@ contains
                            abstol, reltol, maxiter, res3, err, stat                &
         )
         if ( stat /= 0 ) &
-        write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bc) failed to converge'
+            write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bc) failed to converge'
 
         ! Average satellite galaxy bias
         call halo_average2('c', lnma, lnmb, args, mfns, mfspline, bfns, bfspline,  &
                            abstol, reltol, maxiter, res4, err, stat                &
         )
         if ( stat /= 0 ) &
-        write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bs) failed to converge'
+            write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bs) failed to converge'
 
         ! Average galaxy bias
         res = (res3 + res4) / (res1 + res2)
