@@ -32,29 +32,14 @@ module mass_function_mod
         !! A struct containing values of various arguments for halo 
         !! mass-function calculation routines.
 
-        real(c_double) :: z
-        !! Redshift
-
-        real(c_double) :: lnm
-        !! Natural log of halo mass in Msun
-
-        real(c_double) :: H0
-        !! Hubble parameter
-        
-        real(c_double) :: Om0
-        !! Total matter density parameter
-
-        real(c_double) :: Delta_m
-        !! Matter overdensity w.r.to mean background density
-
-        real(c_double) :: s
-        !! Matter variance corresponding to halo mass
-
-        real(c_double) :: dlnsdlnm 
-        !! Log derivative of matter variance w.r.to halo mass
-
-        real(c_double) :: rho_m
-        !! Total matter density at redshift 0 (unit: Msun/Mpc^3)
+        real(c_double) :: z        !! Redshift
+        real(c_double) :: lnm      !! Natural log of halo mass in Msun
+        real(c_double) :: H0       !! Hubble parameter
+        real(c_double) :: Om0      !! Total matter density parameter
+        real(c_double) :: Delta_m  !! Matter overdensity w.r.to mean background density
+        real(c_double) :: s        !! Matter variance corresponding to halo mass
+        real(c_double) :: dlnsdlnm !! Log derivative of matter variance w.r.to halo mass
+        real(c_double) :: rho_m    !! Total matter density at redshift 0 (unit: Msun/Mpc^3)
 
         real(c_double) :: param(16)
         !! Model parameters: since this is used by both mass-function and 

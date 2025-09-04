@@ -13,28 +13,13 @@ module zfunctions_mod
     type, public, bind(c) :: zfargs_t
         !! A struct containing values of various arguments for the redshift 
         !! function calculation routines.
-        
-        real(c_double) :: Om0 
-        !! Total matter density parameter
-
-        real(c_double) :: Ode0
-        !! Dark energy density parameter
-
-        real(c_double) :: w0
-        !! Present value of the dark energy equation of state, w
-        
-        real(c_double) :: wa
-        !! A measure of how w evolves with time
-
-        real(c_double) :: abstol
-        !! Absolute tolerance for checking convergence in integration
-
-        real(c_double) :: reltol
-        !! Relative tolerance for checking convergence in integration
-
-        integer(c_int64_t) :: maxiter
-        !! Maximum number of iterations for calculating integral
-
+        real(c_double)     :: Om0     !! Total matter density parameter
+        real(c_double)     :: Ode0    !! Dark energy density parameter
+        real(c_double)     :: w0      !! Present value of the dark energy equation of state, w
+        real(c_double)     :: wa      !! A measure of how w evolves with time
+        real(c_double)     :: abstol  !! Absolute tolerance for checking convergence in integration
+        real(c_double)     :: reltol  !! Relative tolerance for checking convergence in integration
+        integer(c_int64_t) :: maxiter !! Maximum number of iterations for calculating integral
     end type
     
 contains
