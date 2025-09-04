@@ -169,7 +169,288 @@ contains
 
 ! Halo averages:
 
-    function average_halo_density(args, lnma, lnmb, mfspline, mfns, &
+    subroutine halo_average1(flg, lnma, lnmb, args, mfns, mfspline,  &
+                             abstol, reltol, maxiter, res, err, stat &
+        )
+        !! Calculate the halo average without bias weight in the interval [lnma, lnmb].
+        character(len=1)  , intent(in)  :: flg !! Weight selector (c=central count, s=satellite count, n=no weight)
+        real(c_double)    , intent(in)  :: lnma
+        real(c_double)    , intent(in)  :: lnmb
+        type(hmargs_t)    , intent(in)  :: args !! Model parameter values
+        real(c_double)    , intent(in)  :: mfspline(3,mfns) !! Mass-function spline
+        integer(c_int64_t), intent(in)  :: mfns
+        real(c_double)    , intent(in)  :: abstol  !! Absolute tolerance
+        real(c_double)    , intent(in)  :: reltol  !! Relative tolerance
+        integer(c_int64_t), intent(in)  :: maxiter !! Maximum number of iterations
+        real(c_double)    , intent(out) :: res
+        real(c_double)    , intent(out) :: err
+        integer(c_int)    , intent(out) :: stat !! Error code: 0=ok, 1=integral not converged
+
+        integer(c_int64_t) :: iter
+        real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
+        integer(c_int64_t) :: heap_size, heap_capacity
+        real(c_double), allocatable :: heap(:, :)
+
+        heap_size     = 0
+        heap_capacity = 10*maxiter ! Heap capacity
+        allocate( heap(4, heap_capacity) )
+
+        ! Initial evaluation
+        call halo_average1_(flg, lnma, lnmb, args, mfns, mfspline, res, err)
+        call int_heap_push(heap, heap_size, heap_capacity, lnma, lnmb, I0, err0)
+
+        res  = I0
+        err  = err0
+        stat = 1
+        do iter = 1, maxiter
+
+            ! Stop if tolerance is met
+            if ( err <= max(abstol, reltol*abs(res)) ) then
+                stat = 0 
+                exit
+            endif
+
+            ! Pop worst interval
+            call int_heap_pop(heap, heap_size, heap_capacity, xa, xb, I0, err0)
+
+            xm = 0.5_c_double * (xa + xb)
+            
+            ! Refine on left interval
+            call halo_average1_(flg, xa, xm, args, mfns, mfspline, I1, err1)
+            call int_heap_push(heap, heap_size, heap_capacity, xa, xm, I1, err1) ! Push new interval back
+            
+            ! Refine on left interval
+            call halo_average1_(flg, xm, xb, args, mfns, mfspline, I2, err2)
+            call int_heap_push(heap, heap_size, heap_capacity, xm, xb, I2, err2) ! Push new interval back
+            
+            ! Update global sums
+            res = res + (I1   + I2   - I0  ) ! replace old interval
+            err = err + (err1 + err2 - err0)
+            
+        end do
+
+        deallocate(heap)    
+        
+    end subroutine halo_average1
+
+    ! PRIVATE:
+    subroutine halo_average1_(flg, lnma, lnmb, args, mfns, mfspline, res, err)
+        !! Calculate the halo average with bias weight in the interval [lnma, lnmb]. 
+        character(len=1)  , intent(in)  :: flg
+        real(c_double)    , intent(in)  :: lnma
+        real(c_double)    , intent(in)  :: lnmb
+        type(hmargs_t)    , intent(in)  :: args
+        integer(c_int64_t), intent(in)  :: mfns
+        real(c_double)    , intent(in)  :: mfspline(3,mfns)
+        real(c_double)    , intent(out) :: res
+        real(c_double)    , intent(out) :: err
+
+        integer(c_int64_t) :: j
+        real(c_double)     :: intg, intk, xj, fj, fj_, scale
+
+        scale = 0.5_c_double * (lnmb - lnma)
+
+        xj = lnma + scale
+        fj = exp( interpolate(xj, mfns, mfspline) )
+        select case ( flg )
+        case ( 'c' ) 
+            ! Using central galaxy count as weight
+            fj = fj * central_count(args, xj)
+        case ( 's' ) 
+            ! Using satellite galaxy count as weight
+            fj = fj * satellite_count(args, xj)
+        ! Default: no weight
+        end select 
+        intk  = fj * K15(2,1) 
+        intg  = fj *  G7(2,1) 
+        do j = 2, 8
+
+            xj = lnma + scale * (1. - K15(1,j))  
+            fj = exp( interpolate(xj, mfns, mfspline) ) 
+            select case ( flg )
+            case ( 'c' ) 
+                ! Using central galaxy count as weight
+                fj = fj * central_count(args, xj)
+            case ( 's' ) 
+                ! Using satellite galaxy count as weight
+                fj = fj * satellite_count(args, xj)
+            ! Default: no weight
+            end select
+            fj_ = fj 
+
+            xj = lnma + scale * (1. + K15(1,j)) 
+            fj = exp( interpolate(xj, mfns, mfspline) ) 
+            select case ( flg )
+            case ( 'c' ) 
+                ! Using central galaxy count as weight
+                fj = fj * central_count(args, xj)
+            case ( 's' ) 
+                ! Using satellite galaxy count as weight
+                fj = fj * satellite_count(args, xj)
+            ! Default: no weight
+            end select
+            fj = fj + fj_
+            
+            intk = intk + fj * K15(2,j)
+            if ( mod(j, 2) == 1 ) intg = intg + fj * G7(2,(j+1)/2) ! Point also in G7 rule
+        end do
+        
+        intk = scale * intk
+        intg = scale * intg
+        res  = intk
+        err  = abs(intk - intg)
+        
+    end subroutine halo_average1_
+
+    subroutine halo_average2(flg, lnma, lnmb, args, mfns, mfspline, bfns,      &
+                             bfspline, abstol, reltol, maxiter, res, err, stat &
+        )
+        !! Calculate the halo average without bias weight in the interval [lnma, lnmb].
+        character(len=1)  , intent(in)  :: flg !! Weight selector (c=central count, s=satellite count, n=no weight)
+        real(c_double)    , intent(in)  :: lnma
+        real(c_double)    , intent(in)  :: lnmb
+        type(hmargs_t)    , intent(in)  :: args !! Model parameter values
+        integer(c_int64_t), intent(in)  :: mfns
+        real(c_double)    , intent(in)  :: mfspline(3,mfns) !! Mass-function spline
+        integer(c_int64_t), intent(in)  :: bfns
+        real(c_double)    , intent(in)  :: bfspline(3,bfns) !! Bias spline
+        real(c_double)    , intent(in)  :: abstol  !! Absolute tolerance
+        real(c_double)    , intent(in)  :: reltol  !! Relative tolerance
+        integer(c_int64_t), intent(in)  :: maxiter !! Maximum number of iterations
+        real(c_double)    , intent(out) :: res
+        real(c_double)    , intent(out) :: err
+        integer(c_int)    , intent(out) :: stat !! Error code: 0=ok, 1=integral not converged
+
+        integer(c_int64_t) :: iter
+        real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
+        integer(c_int64_t) :: heap_size, heap_capacity
+        real(c_double), allocatable :: heap(:, :)
+
+        heap_size     = 0
+        heap_capacity = 10*maxiter ! Heap capacity
+        allocate( heap(4, heap_capacity) )
+
+        ! Initial evaluation
+        call halo_average2_(flg, lnma, lnmb, args, mfns, mfspline, &
+                            bfns, bfspline, res, err               &
+        )
+        call int_heap_push(heap, heap_size, heap_capacity, lnma, lnmb, I0, err0)
+
+        res  = I0
+        err  = err0
+        stat = 1
+        do iter = 1, maxiter
+
+            ! Stop if tolerance is met
+            if ( err <= max(abstol, reltol*abs(res)) ) then
+                stat = 0 
+                exit
+            endif
+
+            ! Pop worst interval
+            call int_heap_pop(heap, heap_size, heap_capacity, xa, xb, I0, err0)
+
+            xm = 0.5_c_double * (xa + xb)
+            
+            ! Refine on left interval
+            call halo_average2_(flg, xa, xm, args, mfns, mfspline, &
+                                bfns, bfspline, I1, err1           &
+            )
+            call int_heap_push(heap, heap_size, heap_capacity, xa, xm, I1, err1) ! Push new interval back
+            
+            ! Refine on left interval
+            call halo_average2_(flg, xm, xb, args, mfns, mfspline, &
+                                bfns, bfspline, I2, err2           &
+            )
+            call int_heap_push(heap, heap_size, heap_capacity, xm, xb, I2, err2) ! Push new interval back
+            
+            ! Update global sums
+            res = res + (I1   + I2   - I0  ) ! replace old interval
+            err = err + (err1 + err2 - err0)
+            
+        end do
+
+        deallocate(heap)    
+        
+    end subroutine halo_average2
+
+    ! PRIVATE:
+    subroutine halo_average2_(flg, lnma, lnmb, args, mfns, mfspline, &
+                              bfns, bfspline, res, err               &
+        )
+        !! Calculate the halo average with bias weight in the  interval [lnma, lnmb]. 
+        character(len=1)  , intent(in)  :: flg
+        real(c_double)    , intent(in)  :: lnma
+        real(c_double)    , intent(in)  :: lnmb
+        type(hmargs_t)    , intent(in)  :: args
+        integer(c_int64_t), intent(in)  :: mfns
+        real(c_double)    , intent(in)  :: mfspline(3,mfns)
+        integer(c_int64_t), intent(in)  :: bfns
+        real(c_double)    , intent(in)  :: bfspline(3,bfns)
+        real(c_double)    , intent(out) :: res
+        real(c_double)    , intent(out) :: err
+
+        integer(c_int64_t) :: j
+        real(c_double)     :: intg, intk, xj, fj, fj_, scale
+
+        scale = 0.5_c_double * (lnmb - lnma)
+
+        xj = lnma + scale ! log(m)
+        fj = exp( interpolate(xj, mfns, mfspline) ) 
+        fj = fj * exp( interpolate(xj, bfns, bfspline) )
+        select case ( flg )
+        case ( 'c' ) 
+            ! Using central galaxy count as weight
+            fj = fj * central_count(args, xj)
+        case ( 's' ) 
+            ! Using satellite galaxy count as weight
+            fj = fj * satellite_count(args, xj)
+        ! Default: no weight
+        end select 
+        intk  = fj * K15(2,1) 
+        intg  = fj *  G7(2,1) 
+        do j = 2, 8
+
+            xj = lnma + scale * (1. - K15(1,j))  
+            fj = exp( interpolate(xj, mfns, mfspline) ) 
+            fj = fj * exp( interpolate(xj, bfns, bfspline) )
+            select case ( flg )
+            case ( 'c' ) 
+                ! Using central galaxy count as weight
+                fj = fj * central_count(args, xj)
+            case ( 's' ) 
+                ! Using satellite galaxy count as weight
+                fj = fj * satellite_count(args, xj)
+            ! Default: no weight
+            end select
+            fj_ = fj 
+
+            xj = lnma + scale * (1. + K15(1,j)) 
+            fj = exp( interpolate(xj, mfns, mfspline) ) 
+            fj = fj * exp( interpolate(xj, bfns, bfspline) ) 
+            select case ( flg )
+            case ( 'c' ) 
+                ! Using central galaxy count as weight
+                fj = fj * central_count(args, xj)
+            case ( 's' ) 
+                ! Using satellite galaxy count as weight
+                fj = fj * satellite_count(args, xj)
+            ! Default: no weight
+            end select
+            fj = fj + fj_
+            
+            intk = intk + fj * K15(2,j)
+            if ( mod(j, 2) == 1 ) intg = intg + fj * G7(2,(j+1)/2) ! Point also in G7 rule
+        end do
+        
+        intk = scale * intk
+        intg = scale * intg
+        res  = intk
+        err  = abs(intk - intg)
+        
+    end subroutine halo_average2_
+
+    function average_halo_density(args, lnma, lnmb, mfns, mfspline, &
                                   abstol, reltol, maxiter           &
         ) result(res) bind(c)
         !! Return the average halo number density for the given halo mass 
@@ -200,18 +481,18 @@ contains
         integer(c_int64_t), intent(in), value :: maxiter
         !! Maximum number of iterations for calculating integral
 
-        real(c_double) :: res, err, empty(3, 0) 
+        real(c_double) :: res, err
         integer(c_int) :: stat
         
-        call calc_halo_average(0, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
-                               abstol, reltol, maxiter, res, err, stat                  &
+        call halo_average1('n', lnma, lnmb, args, mfns, mfspline,  &
+                           abstol, reltol, maxiter, res, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_halo_density: integral failed to converge'
         
     end function average_halo_density
 
-    function average_galaxy_density(args, lnma, lnmb, mfspline, mfns, &
+    function average_galaxy_density(args, lnma, lnmb, mfns, mfspline, &
                                     abstol, reltol, maxiter           &
         ) result(res) bind(c)
         !! Return the average galaxy number density for the given halo mass 
@@ -242,19 +523,19 @@ contains
         integer(c_int64_t), intent(in), value :: maxiter
         !! Maximum number of iterations for calculating integral
 
-        real(c_double) :: res, res1, res2, err, empty(3, 0) 
+        real(c_double) :: res, res1, res2, err
         integer(c_int) :: stat
         
         ! Average central galaxy density
-        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
-                               abstol, reltol, maxiter, res1, err, stat                 &
+        call halo_average1('c', lnma, lnmb, args, mfns, mfspline,   &
+                           abstol, reltol, maxiter, res1, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_density: integral (c) failed to converge'
         
         ! Average satellite galaxy density
-        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
-                               abstol, reltol, maxiter, res2, err, stat                 &
+        call halo_average1('s', lnma, lnmb, args, mfns, mfspline,   &
+                           abstol, reltol, maxiter, res2, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_density: integral (s) failed to converge'
@@ -264,7 +545,7 @@ contains
 
     end function average_galaxy_density
 
-    function average_satellite_frac(args, lnma, lnmb, mfspline, mfns, &
+    function average_satellite_frac(args, lnma, lnmb, mfns, mfspline, &
                                     abstol, reltol, maxiter           &
         ) result(res) bind(c)
         !! Return the average satellite fraction for the given halo mass 
@@ -295,19 +576,19 @@ contains
         integer(c_int64_t), intent(in), value :: maxiter
         !! Maximum number of iterations for calculating integral
 
-        real(c_double) :: res, res1, res2, err, empty(3, 0) 
+        real(c_double) :: res, res1, res2, err 
         integer(c_int) :: stat
         
         ! Average central galaxy density
-        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
-                               abstol, reltol, maxiter, res1, err, stat                 &
+        call halo_average1('c', lnma, lnmb, args, mfns, mfspline,   &
+                           abstol, reltol, maxiter, res1, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_satellite_frac: integral (c) failed to converge'
         
         ! Average satellite galaxy density
-        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
-                               abstol, reltol, maxiter, res2, err, stat                 &
+        call halo_average1('s', lnma, lnmb, args, mfns, mfspline,   &
+                           abstol, reltol, maxiter, res2, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_satellite_frac: integral (s) failed to converge'
@@ -317,8 +598,8 @@ contains
         
     end function average_satellite_frac
 
-    function average_galaxy_bias(args, lnma, lnmb, mfspline, mfns, bfspline, &
-                                 bfns, abstol, reltol, maxiter               &
+    function average_galaxy_bias(args, lnma, lnmb, mfns, mfspline, bfns, &
+                                 bfspline, abstol, reltol, maxiter       &
         ) result(res) bind(c)
         !! Return the average satellite fraction for the given halo mass 
         !! range at current redshift.
@@ -354,33 +635,33 @@ contains
         integer(c_int64_t), intent(in), value :: maxiter
         !! Maximum number of iterations for calculating integral
 
-        real(c_double) :: res, res1, res2, res3, res4, err, empty(3, 0)
+        real(c_double) :: res, res1, res2, res3, res4, err
         integer(c_int) :: stat
 
         ! Average central galaxy density
-        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
-                               abstol, reltol, maxiter, res1, err, stat                 &
+        call halo_average1('c', lnma, lnmb, args, mfns, mfspline,   &
+                           abstol, reltol, maxiter, res1, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_bias: integral (c) failed to converge'
 
         ! Average satellite galaxy density
-        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, empty, 0_c_int64_t, &
-                               abstol, reltol, maxiter, res2, err, stat                 &
+        call halo_average1('s', lnma, lnmb, args, mfns, mfspline,   &
+                           abstol, reltol, maxiter, res2, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_bias: integral (s) failed to converge'
 
         ! Average central galaxy bias
-        call calc_halo_average(1, lnma, lnmb, args, mfspline, mfns, bfspline, bfns, &
-                               abstol, reltol, maxiter, res3, err, stat             &
+        call halo_average2('c', lnma, lnmb, args, mfns, mfspline, bfns, bfspline,  &
+                           abstol, reltol, maxiter, res3, err, stat                &
         )
         if ( stat /= 0 ) &
         write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bc) failed to converge'
 
         ! Average satellite galaxy bias
-        call calc_halo_average(2, lnma, lnmb, args, mfspline, mfns, bfspline, bfns, &
-                               abstol, reltol, maxiter, res4, err, stat             &
+        call halo_average2('c', lnma, lnmb, args, mfns, mfspline, bfns, bfspline,  &
+                           abstol, reltol, maxiter, res4, err, stat                &
         )
         if ( stat /= 0 ) &
         write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bs) failed to converge'
@@ -389,192 +670,5 @@ contains
         res = (res3 + res4) / (res1 + res2)
 
         end function average_galaxy_bias
-
-    subroutine calc_halo_average(f, a, b, args, mfspline, mfns, bfspline, bfns, &
-                                 abstol, reltol, maxiter, res, err, stat        &
-        )
-        !! Calculate the halo average with optional bias weight. 
-
-        integer(c_int), intent(in), value :: f
-        !! Function selector (0=no weight, 1=central count, 2=satellite count)
-
-        real(c_double), intent(in), value :: a
-        !! Lower limit of integration
-
-        real(c_double), intent(in), value :: b
-        !! Upper limit of integration
-
-        type(hmargs_t), intent(in) :: args
-        !! Model parameter values
-
-        real(c_double), intent(in) :: mfspline(3,mfns)
-        !! Mass-function spline
-
-        integer(c_int64_t), intent(in), value :: mfns
-        !! Size of the mass-function spline
-
-        real(c_double), intent(in) :: bfspline(3,bfns)
-        !! Bias spline
-
-        integer(c_int64_t), intent(in), value :: bfns
-        !! Size of the bias spline
-
-        real(c_double), intent(in), value :: abstol
-        !! Absolute tolerance
-
-        real(c_double), intent(in), value :: reltol
-        !! Relative tolerance
-
-        integer(c_int64_t), intent(in), value :: maxiter
-        !! Maximum number of iterations for calculating integral
-
-        real(c_double), intent(out) :: res
-        !! Value of the integral of f over [a, b]
-
-        real(c_double), intent(out) :: err
-        !! Estimate of the error in integration
-
-        integer(c_int), intent(out) :: stat
-        !! Error code: 0=ok, 1=integral not converged
-
-        integer(c_int64_t) :: iter
-        real(c_double)     :: xa, xb, xm, I0, I1, I2, err0, err1, err2
-        integer(c_int64_t) :: heap_size, heap_capacity
-        real(c_double), allocatable :: heap(:, :)
-
-        heap_size     = 0
-        heap_capacity = 10*maxiter ! Heap capacity
-        allocate( heap(4, heap_capacity) )
-
-        ! Initial evaluation
-        call calc_halo_average2(f, a, b, args, mfspline, mfns, &
-                                bfspline, bfns, I0, err0       &
-        )
-        call int_heap_push(heap, heap_size, heap_capacity, a, b, I0, err0)
-
-        res  = I0
-        err  = err0
-        stat = 1
-        do iter = 1, maxiter
-
-            ! Stop if tolerance is met
-            if ( err <= max(abstol, reltol*abs(res)) ) then
-                stat = 0 
-                exit
-            endif
-
-            ! Pop worst interval
-            call int_heap_pop(heap, heap_size, heap_capacity, xa, xb, I0, err0)
-
-            xm = 0.5_c_double * (xa + xb)
-            
-            ! Refine on left interval
-            call calc_halo_average2(f, xa, xm, args, mfspline, mfns, &
-                                    bfspline, bfns, I1, err1         &
-            )
-            call int_heap_push(heap, heap_size, heap_capacity, xa, xm, I1, err1) ! Push new interval back
-            
-            ! Refine on left interval
-            call calc_halo_average2(f, xm, xb, args, mfspline, mfns, &
-                                    bfspline, bfns, I2, err2         &
-            )
-            call int_heap_push(heap, heap_size, heap_capacity, xm, xb, I2, err2) ! Push new interval back
-            
-            ! Update global sums
-            res = res + (I1   + I2   - I0  ) ! replace old interval
-            err = err + (err1 + err2 - err0)
-            
-        end do
-
-        deallocate(heap)    
-        
-    end subroutine calc_halo_average
-
-    subroutine calc_halo_average2(f, a, b, args, mfspline, mfns, bfspline, &
-                                  bfns, res, err                           &
-        )
-        !! Calculate the halo average with optional bias weight in the 
-        !! interval [a, b]. 
-
-        integer(c_int), intent(in), value :: f
-        !! Function selector (0=no weight, 1=central count, 2=satellite count)
-
-        real(c_double), intent(in), value :: a
-        !! Lower limit of integration
-
-        real(c_double), intent(in), value :: b
-        !! Upper limit of integration
-
-        type(hmargs_t), intent(in) :: args
-        !! Model parameter values
-
-        real(c_double), intent(in) :: mfspline(3,mfns)
-        !! Mass-function spline
-
-        integer(c_int64_t), intent(in), value :: mfns
-        !! Size of the mass-function spline
-
-        real(c_double), intent(in) :: bfspline(3,bfns)
-        !! Bias spline
-
-        integer(c_int64_t), intent(in), value :: bfns
-        !! Size of the bias spline
-
-        real(c_double), intent(out) :: res
-        !! Value of the integral of f over [a, b]
-
-        real(c_double), intent(out) :: err
-        !! Estimate of the error in integration
-            
-        integer(c_int64_t) :: j
-        real(c_double)     :: intg, intk, xval, fval, fval2, scale
-
-        scale = 0.5_c_double * (b - a)
-        xval  = a + scale ! log(m)
-        fval  = exp( interpolate(xval, mfns, mfspline) ) ! dn/dlnm
-        if ( bfns > 0 ) fval = fval * exp( interpolate(xval, bfns, bfspline) ) ! bias
-        select case ( f )
-        case ( 1 ) ! weight=central galaxy count
-            fval = fval * central_count(args, xval)
-        case ( 2 ) ! weight=satellite galaxy count
-            fval = fval * satellite_count(args, xval)
-        ! default=no weight
-        end select 
-        intk  = fval * K15(2,1) 
-        intg  = fval *  G7(2,1) 
-        do j = 2, 8
-
-            xval = a + scale * (1. - K15(1,j)) ! log(m)
-            fval = exp( interpolate(xval, mfns, mfspline) ) ! dn/dlnm
-            if ( bfns > 0 ) fval = fval * exp( interpolate(xval, bfns, bfspline) ) ! bias
-            select case ( f )
-            case ( 1 ) ! weight=central galaxy count
-                fval = fval * central_count(args, xval)
-            case ( 2 ) ! weight=satellite galaxy count
-                fval = fval * satellite_count(args, xval)
-            ! default=no weight
-            end select 
-
-            xval  = a + scale * (1. + K15(1,j)) ! log(m)
-            fval2 = exp( interpolate(xval, mfns, mfspline) ) ! dn/dlnm
-            if ( bfns > 0 ) fval2 = fval2 * exp( interpolate(xval, bfns, bfspline) ) ! bias
-            select case ( f )
-            case ( 1 ) ! weight=central galaxy count
-                fval2 = fval2 * central_count(args, xval)
-            case ( 2 ) ! weight=satellite galaxy count
-                fval2 = fval2 * satellite_count(args, xval)
-            ! default=no weight
-            end select 
-            fval = fval + fval2
-            
-            intk = intk + fval * K15(2,j)
-            if ( mod(j, 2) == 1 ) intg = intg + fval * G7(2,(j+1)/2) ! Point also in G7 rule
-        end do
-        intk = scale * intk
-        intg = scale * intg
-        res  = intk
-        err  = abs(intk - intg)
-        
-    end subroutine calc_halo_average2
 
 end module halo_model_mod
