@@ -182,7 +182,7 @@ contains
 
 ! Halo averages:
 
-    subroutine halo_average1(flg, lnma, lnmb, hod, mfns, mfspline,  &
+    subroutine halo_average1(flg, lnma, lnmb, hod, mfns, mfspline,   &
                              abstol, reltol, maxiter, res, err, stat &
         )
         !! Calculate the halo average without bias weight in the interval [lnma, lnmb].
@@ -321,7 +321,7 @@ contains
         
     end subroutine halo_average1_
 
-    subroutine halo_average2(flg, lnma, lnmb, hod, mfns, mfspline, bfns,      &
+    subroutine halo_average2(flg, lnma, lnmb, hod, mfns, mfspline, bfns,       &
                              bfspline, abstol, reltol, maxiter, res, err, stat &
         )
         !! Calculate the halo average without bias weight in the interval [lnma, lnmb].
@@ -512,7 +512,7 @@ contains
         ! HOD parameters
         hod = [ args%lnm_min, args%sigma_m, args%lnm0, args%lnm1, args%alpha ] 
         
-        call halo_average1('n', lnma, lnmb, hod, mfns, mfspline,  &
+        call halo_average1('n', lnma, lnmb, hod, mfns, mfspline,   &
                            abstol, reltol, maxiter, res, err, stat &
         )
         if ( stat /= 0 ) &
@@ -558,14 +558,14 @@ contains
         hod = [ args%lnm_min, args%sigma_m, args%lnm0, args%lnm1, args%alpha ] 
         
         ! Average central galaxy density
-        call halo_average1('c', lnma, lnmb, hod, mfns, mfspline,   &
+        call halo_average1('c', lnma, lnmb, hod, mfns, mfspline,    &
                            abstol, reltol, maxiter, res1, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_density: integral (c) failed to converge'
         
         ! Average satellite galaxy density
-        call halo_average1('s', lnma, lnmb, hod, mfns, mfspline,   &
+        call halo_average1('s', lnma, lnmb, hod, mfns, mfspline,    &
                            abstol, reltol, maxiter, res2, err, stat &
         )
         if ( stat /= 0 ) &
@@ -614,14 +614,14 @@ contains
         hod = [ args%lnm_min, args%sigma_m, args%lnm0, args%lnm1, args%alpha ] 
         
         ! Average central galaxy density
-        call halo_average1('c', lnma, lnmb, hod, mfns, mfspline,   &
+        call halo_average1('c', lnma, lnmb, hod, mfns, mfspline,    &
                            abstol, reltol, maxiter, res1, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_satellite_frac: integral (c) failed to converge'
         
         ! Average satellite galaxy density
-        call halo_average1('s', lnma, lnmb, hod, mfns, mfspline,   &
+        call halo_average1('s', lnma, lnmb, hod, mfns, mfspline,    &
                            abstol, reltol, maxiter, res2, err, stat &
         )
         if ( stat /= 0 ) &
@@ -676,28 +676,28 @@ contains
         hod = [ args%lnm_min, args%sigma_m, args%lnm0, args%lnm1, args%alpha ] 
 
         ! Average central galaxy density
-        call halo_average1('c', lnma, lnmb, hod, mfns, mfspline,   &
+        call halo_average1('c', lnma, lnmb, hod, mfns, mfspline,    &
                            abstol, reltol, maxiter, res1, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_bias: integral (c) failed to converge'
 
         ! Average satellite galaxy density
-        call halo_average1('s', lnma, lnmb, hod, mfns, mfspline,   &
+        call halo_average1('s', lnma, lnmb, hod, mfns, mfspline,    &
                            abstol, reltol, maxiter, res2, err, stat &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_bias: integral (s) failed to converge'
 
         ! Average central galaxy bias
-        call halo_average2('c', lnma, lnmb, hod, mfns, mfspline, bfns, bfspline,  &
+        call halo_average2('c', lnma, lnmb, hod, mfns, mfspline, bfns, bfspline,   &
                            abstol, reltol, maxiter, res3, err, stat                &
         )
         if ( stat /= 0 ) &
             write(stderr,'(a)') 'warning: average_galaxy_bias: integral (bc) failed to converge'
 
         ! Average satellite galaxy bias
-        call halo_average2('c', lnma, lnmb, hod, mfns, mfspline, bfns, bfspline,  &
+        call halo_average2('c', lnma, lnmb, hod, mfns, mfspline, bfns, bfspline,   &
                            abstol, reltol, maxiter, res4, err, stat                &
         )
         if ( stat /= 0 ) &
