@@ -20,8 +20,8 @@ module halo_model_mod
         real(c_double) :: lnm_min    !! Minimum halo mass (in Msun) to have at least one central galaxy 
         real(c_double) :: sigma_m    !! Width of the central galaxy transition range. (0 for a step function)
         real(c_double) :: lnm0       !! Minimum halo mass (in Msun) to have satellite galaxies
-        real(c_double) :: lnm1       !! Scale factor for power law satelliete count relation (Msun)
-        real(c_double) :: alpha      !! Index for the  power law satelliete count relation
+        real(c_double) :: lnm1       !! Scale factor for power law satellite count relation (Msun)
+        real(c_double) :: alpha      !! Index for the  power law satellite count relation
         real(c_double) :: scale_shmf !! Scale parameter for the subhalo mass-function
         real(c_double) :: slope_shmf !! Slope parameter for the subhalo mass-function
         real(c_double) :: z          !! Redshift
