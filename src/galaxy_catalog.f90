@@ -11,7 +11,8 @@ module galaxy_catalog_mod
     implicit none
 
     private
-    public :: setup_catalog_generation, generate_galaxies, generate_galaxy_catalog
+    public :: setup_catalog_generation, generate_galaxies, generate_galaxy_catalog, &
+              generate_galaxy_catalog2
     
     type, public, bind(c) :: halodata_t
         !! A struct containing data about a halo
@@ -199,18 +200,13 @@ contains
         
     end function nfw_c
 
-    subroutine generate_galaxy_catalog(hcat, nhalos, sigma, ns, hmargs, &
-                                       bbox, seed, fid, nthreads        &
+    subroutine generate_galaxy_catalog2(hcat, nhalos, sigma, ns, hmargs, &
+                                        bbox, seed, fid, nthreads        &
         ) bind(c)
-        !! Generate a galaxy catalog using the given halo catalog. 
+        !! **Deprecated**: will be removed later.
         !! 
-        !! The catalog will be saved to the file `{fid}.dat` in the working 
-        !! directory. This binary file contains a string of records for each 
-        !! galaxy, where each record consists of a parent halo ID (`int64`), 
-        !! position coordinates (`float64[3]`), mass (`float64`) and typecode 
-        !! (`char`, `'c'` for central and `'s'` for satellite). Little endian 
-        !! byte order is used for portability.
-
+        !! Generate a galaxy catalog using the given halo catalog. 
+        
         type(halodata_t), intent(in) :: hcat(nhalos)
         !! Halo catalog
 
@@ -251,19 +247,186 @@ contains
         integer(c_int), intent(in), value :: nthreads
         !! Number of threads to use
 
-        character(len=256) :: fn, tfn
-        integer(c_int)     :: tid, fu, fo, ierr
-        integer(c_int64_t) :: i, gbuf_size, ng, halo_id
-        type(cgargs_t)     :: args 
-        real(c_double)     :: gdata(4)
-        real(c_double), allocatable :: gbuf(:,:) ! Galxy position and mass 
+        integer(c_int64_t) :: ngals, rstate(nthreads)
+        integer(c_int)     ::  tid
 
         ! Set number of threads
         call omp_set_num_threads(nthreads) 
 
-        !$OMP PARALLEL PRIVATE(tid, tfn, fu, args, gbuf_size, gbuf, ng)
+        ! Initialising the random number generator. This RNG works on a state 
+        ! private to the thread, with a seed offset by the main seed. So, the 
+        ! generated RVs should be a different sequence on each thread.
+        do tid = 1, nthreads
+            call pcg32_init(rstate(tid), seed + 1000*tid)
+        end do
+
+        ! Generating galaxies
+        call generate_galaxy_catalog_(hcat, nhalos, sigma, ns, bbox, hmargs, &
+                                        fid, nthreads, rstate, ngals         &
+        )
+
+        ! Merge data from all the temporary files to the specified output file
+        ! in the correct format. That is, a binary file with each galaxy entry 
+        ! corresponds to a parent halo ID (int64), galaxy type (character `C`
+        ! for central and `S` for satellite), position coordinates and mass 
+        ! (all float64).
+        call merge_data_from_threads_(fid, nthreads)
         
+    end subroutine generate_galaxy_catalog2
+
+    subroutine generate_galaxy_catalog(fid, sigma, ns, hmargs, bbox, seed, nthreads) bind(c)
+        !! Generate a galaxy catalog using the given halo catalog. 
+        !! 
+        !! The catalog will be saved to the file `{fid}.dat` in the working 
+        !! directory. This binary file contains a string of records for each 
+        !! galaxy, where each record consists of a parent halo ID (`int64`), 
+        !! position coordinates (`float64[3]`), mass (`float64`) and typecode 
+        !! (`char`, `'c'` for central and `'s'` for satellite). Little endian 
+        !! byte order is used for portability.
+
+        integer(c_int64_t), intent(in), value :: fid
+        !! A unique ID for generating the output filename storing galaxy 
+        !! catalog data. Given a positive integer, the filename would be
+        !! `{fid}.dat`. 
+        ! 
+        ! NOTE: This is a simple work-around to bypass the difficulties in 
+        ! passing a string filename to this subroutine, when calling from 
+        ! external C or python codes. In that case, a wrapper should be 
+        ! written to handle the C string and convert it to fortran string.
+        ! Using an ID and a file naming logic, the need for a seperate  
+        ! wrapper can be dropped, and the user can do anything with the 
+        ! generated file later. :)
+
+        real(c_double), intent(in) :: sigma(3,ns)
+        !! Natural spline data for calculating matter variance. This should 
+        !! give the value of `log(sigma)=log(variance)/2` as a function of
+        !! the natural log of halo mass in Msun.
+
+        integer(c_int64_t), intent(in), value :: ns
+        !! Size of the variance spline
+
+        type(hmargs_t), intent(in) :: hmargs
+        !! Halo model parameters
+
+        real(c_double), intent(in) :: bbox(3,2)
+        !! Bounding box for the halo positions. First row specifies the 
+        !! minimum and second row maximum bound. 
+
+        integer(c_int64_t), intent(in), value :: seed
+        !! Seed value for random number generators
+
+        integer(c_int), intent(in), value :: nthreads
+        !! Number of threads to use
+
+        integer(c_int64_t), parameter :: chunk_size      = 10000
+        integer(c_int64_t), parameter :: item_size_bytes = c_sizeof( &
+            halodata_t(                                    &
+                  0_c_int64_t,                             &
+                [ 0._c_double, 0._c_double, 0._c_double ], &
+                  0._c_double )                            &   
+        ) !! Size of `halodata_t`: should be 40
+
+        character(len=256) :: ifn, lfn
+        integer(c_int)     :: tid, fi, fl, ierr
+        integer(c_int64_t) :: file_size_bytes, rstate(nthreads)
+        integer(c_int64_t) :: n_halos_total, n_halos_processed, n_halos, n_galaxies
+        type(halodata_t), allocatable :: hbuf(:)   ! Halo data
+
+        fi = 9 ! file unit for input
+        write(ifn, '(i0,".inp")') fid ! filename for input
+        open(newunit=fi, file=ifn, access='stream', form='unformatted', &
+             convert='little_endian', status='old', action='read'       &
+        ) ! input file
+
+        fl = 8 ! file unit for logs
+        write(lfn, '(i0,".log")') fid ! filename for logs
+        open(newunit=fl, file=lfn, status="replace", action="write") ! log file
+
+        ! Get the number of halos from the file: since the input file is expected 
+        ! to be a binary stream of `halodata_t` (size: 40 bytes), number of halos
+        ! in the file can be calculated as `file_size_bytes / item_size_bytes` 
+        inquire(fi, size=file_size_bytes)
+        n_halos_total = file_size_bytes / item_size_bytes
+        
+        if ( n_halos_total < 1 ) return
+        write(fl, '("found ",i0," halos...")') n_halos_total
+        
+        ! Allocate halo data buffer
+        allocate( hbuf(chunk_size) )
+        
+        ! Set number of threads
+        call omp_set_num_threads(nthreads) 
+        write(fl, '("galaxy catalog generation using ",i0," threads")') nthreads
+
+        ! Initialising the random number generator. This RNG works on a state 
+        ! private to the thread, with a seed offset by the main seed. So, the 
+        ! generated RVs should be a different sequence on each thread.
+        do tid = 1, nthreads
+            call pcg32_init(rstate(tid), seed + 1000*tid)
+        end do
+
+        ! Loading halo data a chunks from the input file
+        n_halos_processed = 0
+        n_galaxies        = 0_c_int64_t ! number of galaxies generated so far
+        do while ( n_halos_processed < n_halos_total )
+            
+            ! Loading halos
+            n_halos = min(chunk_size, n_halos_total - n_halos_processed) ! actual chunk size 
+            read(fi, iostat=ierr) hbuf(1:n_halos)
+            if ( ierr /= 0 ) exit
+
+            ! Generating galaxies 
+            call generate_galaxy_catalog_(hbuf(1:n_halos), n_halos, sigma, ns, bbox, &
+                                          hmargs, fid, nthreads, rstate, n_galaxies  &
+            )
+
+            n_halos_processed = n_halos_processed + n_halos
+            write(fl, '("used ",i0," of ",i0," halos, generated ",i0," galaxies")') &
+                n_halos_processed, n_halos, n_galaxies
+            
+        end do
+        write(fl, '(a)') 'galaxy catalog generation completed.'
+
+        close(fi)
+        deallocate( hbuf )
+
+        ! Merge data from all the temporary files to the specified output file
+        write(fl, '(a)') 'merging data from temporary files...'
+        call merge_data_from_threads_(fid, nthreads)
+        write(fl, '(a)') 'data merging completed.'
+        
+        write(fl, '(a)') 'END' ! sentinal to mark the end of log file
+        close(fl) ! close log file
+        
+    end subroutine generate_galaxy_catalog
+
+    subroutine generate_galaxy_catalog_(hbuf, n_halos, sigma, ns, bbox, hmargs, &
+                                        fid, nthreads, rstate, ngals            &
+        )
+        !! Generate galaxy catalog from halo catalog.
+
+        type(halodata_t)  , intent(in)    :: hbuf(n_halos)   
+        integer(c_int64_t), intent(in)    :: n_halos
+        real(c_double)    , intent(in)    :: sigma(3,ns)
+        integer(c_int64_t), intent(in)    :: ns
+        real(c_double)    , intent(in)    :: bbox(3,2)
+        type(hmargs_t)    , intent(in)    :: hmargs
+        integer(c_int64_t), intent(in)    :: fid   
+        integer(c_int)    , intent(in)    :: nthreads
+        integer(c_int64_t), intent(inout) :: rstate(nthreads), ngals
+
+        character(len=256) :: tfn
+        integer(c_int)     :: tid, fu
+        integer(c_int64_t) :: i, gbuf_size, ng, ngals_thread(nthreads) 
+        type(cgargs_t)     :: args 
+        real(c_double), allocatable :: gbuf(:,:) ! Galxy position and mass 
+
+        ngals_thread(1:nthreads) = 0_c_int64_t ! number of galaxies generated in a thread
+
+        !$OMP PARALLEL PRIVATE(tid, tfn, fu, args, gbuf_size, gbuf, ng)
+            
         tid = omp_get_thread_num() + 1 ! thread ID
+        args%rstate = rstate(tid)      ! set RNG state
         
         ! Opening a private temporary file for writing data from this thread. 
         ! These files will have a specific filename and unit ID based on the 
@@ -276,11 +439,6 @@ contains
              action='write'                                                &
         )
 
-        ! Initialising the random number generator. This RNG works on a state 
-        ! private to the thread, with a seed offset by the main seed. So, the 
-        ! generated RVs should be a different sequence on each thread.
-        call pcg32_init(args%rstate, seed + 1000*tid) 
-
         ! Allocate galaxy data table: At first, an array that can hold a maximum 
         ! of 1024 galaxies are allocated on each thread. This is reallocated if 
         ! needed.
@@ -292,11 +450,11 @@ contains
         args%offset(1:3)  = bbox(1:3,1) ! Offset or bottom-lower-left corner coordinates
 
         !$OMP DO SCHEDULE(static)
-        do i = 1, nhalos
+        do i = 1, n_halos
 
             ! Copy halo data to local args
-            args%pos(1:3) = hcat(i)%pos(1:3)    ! position
-            args%lnm      = log( hcat(i)%mass ) ! mass
+            args%pos(1:3) = hbuf(i)%pos(1:3)    ! position
+            args%lnm      = log( hbuf(i)%mass ) ! mass
             args%s        = exp( interpolate(args%lnm, ns, sigma) ) ! matter variance
 
             ! Setting up 
@@ -304,36 +462,50 @@ contains
 
             ng = args%n_cen + args%n_sat ! total number of galaxies in this halo 
             if ( ng < 1 ) cycle
+            ngals_thread(tid) = ngals_thread(tid) + ng
 
             ! Ensure there is enough space for storing all the expected galaxies. 
             ! Galaxy buffer is resized if needed.
-            call ensure_capacity_thread(gbuf, gbuf_size, ng, 4_c_int64_t)
+            call ensure_capacity_thread_(gbuf, gbuf_size, ng, 4_c_int64_t)
             
             ! Generating the galaxies
             call generate_galaxies( hmargs, args, ng, gbuf(:,1:ng) )
 
             ! Saving the galaxy data to the thread specific output file.
-            write(fu) hcat(i)%id   ! halo unique ID
+            write(fu) hbuf(i)%id   ! halo unique ID
             write(fu) ng           ! number of galaxies in this block
             write(fu) gbuf(:,1:ng) ! galaxy data
 
         end do
         !$OMP END DO
-
+        
         deallocate( gbuf )
         close(fu) ! closing the thread specific temp file
 
-        !$OMP END PARALLEL 
+        ! Save final RNG state for continuing the sequence for next chunk
+        rstate(tid) = args%rstate 
 
-        ! Merge data from all the temporary files to the specified output file
-        ! in the correct format. That is, a binary file with each galaxy entry 
-        ! corresponds to a parent halo ID (int64), galaxy type (character `C`
-        ! for central and `S` for satellite), position coordinates and mass 
-        ! (all float64).
+        !$OMP END PARALLEL
+
+        ngals = ngals + sum(ngals_thread) ! total number of galaxies generated so far...
+        
+    end subroutine generate_galaxy_catalog_
+
+    subroutine merge_data_from_threads_(fid, nthreads)
+        !! Merge data files from different threads to single output file.
+
+        integer(c_int64_t), intent(in) :: fid   
+        integer(c_int)    , intent(in) :: nthreads
+        
+        character(len=256) :: ofn, tfn
+        integer(c_int)     :: tid, fo, fu, ierr
+        integer(c_int64_t) :: i, ng, halo_id 
+        real(c_double)     :: gdata(4)
+
         fu = 10 ! file unit for temporary outputs 
         fo = 11 ! file unit for main output
-        write(fn, '(i0,".dat")') fid ! filename for main output
-        open(newunit=fo, file=fn, access='stream', form='unformatted', &
+        write(ofn, '(i0,".dat")') fid ! filename for main output
+        open(newunit=fo, file=ofn, access='stream', form='unformatted', &
              convert='little_endian', status='replace', action='write' &
         ) ! main output file 
 
@@ -343,6 +515,9 @@ contains
                  convert='little_endian', status='old', action='read'       &
             ) ! temporary file
 
+            ! The output file is a binary stream of galaxy records, each having 
+            ! a parent halo ID (int64), position coordinates and mass (float64), 
+            ! and galaxy type (character `C` for central and `S` for satellite). 
             do 
                 ! Read halo ID and number of galaxies associated with this halo 
                 read(fu, iostat=ierr) halo_id, ng 
@@ -368,11 +543,12 @@ contains
             close(fu, status='delete') 
 
         end do
+
         close(fo) ! close main output file
         
-    end subroutine generate_galaxy_catalog
+    end subroutine merge_data_from_threads_
 
-    subroutine ensure_capacity_thread(arr, current_size, needed_size, ncols)
+    subroutine ensure_capacity_thread_(arr, current_size, needed_size, ncols)
         !! Safely grow a 2D buffer [ncols, capacity] for one thread
 
         real(c_double), allocatable, intent(inout) :: arr(:,:) ! shape (ncols, capacity)
@@ -389,6 +565,6 @@ contains
             call move_alloc(tmp, arr)
         end if
 
-    end subroutine ensure_capacity_thread
+    end subroutine ensure_capacity_thread_
     
 end module galaxy_catalog_mod
