@@ -116,48 +116,59 @@ def test_galaxy_generation():
     plt.show()
 
 def test_galaxy_generation2():
-    from haloutils._core import lib, i8, i4, hmargs_t, POINTER, f8pointer
+    from haloutils._core import lib, i8, i4
+    
+    hmargs_t = np.dtype([
+        ( 'lnm_min', '<f8' ), ( 'sigma_m'   , '<f8' ), ( 'lnm0'      , '<f8' ), ( 'lnm1' , '<f8' ),       
+        ( 'alpha'  , '<f8' ), ( 'scale_shmf', '<f8' ), ( 'slope_shmf', '<f8' ), ( 'z'    , '<f8' ),          
+        ( 'H0'     , '<f8' ), ( 'Om0'       , '<f8' ), ( 'Delta_m'   , '<f8' ), ( 'dplus', '<f8' ),      
+    ])
+    halodata_t   = np.dtype([('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8')])
+    galaxydata_t = np.dtype([('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8'), ('typ', 'S1')])
 
-    halodata_t = np.dtype([('id', 'i8'), ('pos', 'f8', 3), ('mass', 'f8')])
-    lib.generate_galaxy_catalog.argtypes = [
-        np.ctypeslib.ndpointer(dtype=halodata_t, ndim=1, flags='C_CONTIGUOUS'), 
-        i8, f8pointer(2), i8, POINTER(hmargs_t), f8pointer(2), i8, i8, i4,      
-    ]
+    lib.generate_galaxy_catalog.argtypes = [i8, i8, i4]
     lib.generate_galaxy_catalog.restype = None
+    fid = 0
 
-    lib.generate_cspline.argtypes = [ i8, f8pointer(2) ]
-    lib.generate_cspline.restype  = None
+    args = np.array((
+        hm.lnm_min, hm.sigma_m   , hm.lnm0      , hm.lnm1 ,       
+        hm.alpha  , hm.scale_shmf, hm.slope_shmf, hm.z    ,          
+        hm.H0     , hm.Om0       , hm.Delta_m   , hm.dplus,
+    ), dtype=hmargs_t)
   
-    sigma      = np.zeros((101, 3))
+    sigma      = np.zeros((101, 2))
     sigma[:,0] = np.linspace(np.log(1e+08), np.log(1e+16), sigma.shape[0])
-    sigma[:,2] = hm.lagrangian_r(sigma[:,0])
-    sigma[:,1] = ps.spectral_moment(sigma[:,2])
+    sigma[:,1] = ps.spectral_moment( hm.lagrangian_r(sigma[:,0]) )
     sigma[:,1] = np.log(sigma[:,1]) / 2.
-    lib.generate_cspline(sigma.shape[0], sigma)
-
+    sigma      = sigma.astype('<f8')
     bbox = np.array([[-100., -100., -100.], 
-                     [ 100.,  100.,  100.]])
-
-    rng = np.random.default_rng(12345)
+                     [ 100.,  100.,  100.]]).astype('<f8')
 
     m_halo = 1e+14
-    hcat   = np.zeros((20_000,), dtype=halodata_t)
-    hcat['id']   = np.arange(hcat.shape[0]) + 1
-    hcat['mass'] = m_halo
-    hcat['pos']  = rng.uniform(bbox[0,:], bbox[1,:], (hcat.shape[0], 3))
-    # print(hcat)
+    rng    = np.random.default_rng(12345)
+    hbuf   = np.zeros((100_000,), dtype=halodata_t)
+    hbuf['id']   = np.arange(1, hbuf.shape[0]+1).astype('<i8')
+    hbuf['pos']  = rng.uniform(bbox[0,:], bbox[1,:], (hbuf.shape[0], 3)).astype('<f8')
+    hbuf['mass'] = np.array(m_halo).astype('<f8')
+    # print(hbuf)
+    with open(f'{fid}.hbuf.dat', 'wb') as f:
+        hbuf.tofile(f)
 
-    fid = 0
-    lib.generate_galaxy_catalog( hcat, hcat.shape[0], sigma, sigma.shape[0], hm.pointer(), bbox, 123456, fid, 4 )
+    with open(f'{fid}.vars.dat', 'wb') as f:
+        args.tofile(f)
+        bbox.tofile(f)
+        np.array([ sigma.shape[0] ], dtype='<i8').tofile(f)
+        sigma.tofile(f)
+        
+    lib.generate_galaxy_catalog(fid, 123456, 4)
 
-    galdata_t = np.dtype([('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8'), ('typ', 'S1')])
-    gcat = np.fromfile(f'{fid}.dat', dtype=galdata_t)
-    # print(gcat)
-    # print(gcat.shape)
+    gbuf = np.fromfile(f'{fid}.gbuf.dat', dtype=galaxydata_t)
+    # print(gbuf)
+    # print(gbuf.shape)
 
-    mask      = gcat['typ'] == b'c'
-    central   = gcat[mask]
-    satellite = gcat[~mask]
+    mask      = gbuf['typ'] == b'c'
+    central   = gbuf[mask]
+    satellite = gbuf[~mask]
 
     halo_map   = { key: index for index, key in enumerate(central['id']) }
     halo_order = [ halo_map[key] for key in satellite['id'] ]
@@ -176,7 +187,7 @@ def test_galaxy_generation2():
     plt.loglog(centers, hist, label='Sampled')
     plt.loglog(centers, rho_theory*centers**2, label='Theory')
     plt.show()
-
+    
     msat = satellite['mass'] 
     bins = np.logspace(np.log10(1e-3*m_halo), np.log10(m_halo), 50)
     hist, edges = np.histogram(msat, bins=bins, density=True)
