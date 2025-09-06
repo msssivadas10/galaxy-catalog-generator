@@ -42,8 +42,7 @@ module galaxy_catalog_mod
         !! Coordinates of the bottom-lower-left corner of the bounding 
         !! box. Used for periodic wrapping galaxy position.
 
-    end type
-    
+    end type 
         
 contains
 
@@ -297,10 +296,10 @@ contains
         ! wrapper can be dropped, and the user can do anything with the 
         ! generated file later. :)
 
-        real(c_double), intent(in) :: sigma(3,ns)
-        !! Natural spline data for calculating matter variance. This should 
-        !! give the value of `log(sigma)=log(variance)/2` as a function of
-        !! the natural log of halo mass in Msun.
+        real(c_double), intent(inout) :: sigma(3,ns)
+        !! Table of matter variance (sigma) values as function of halo mass 
+        !! (in Msun). All values should be in natural log. The extra 3-rd 
+        !! column is used for storing the spline data.  
 
         integer(c_int64_t), intent(in), value :: ns
         !! Size of the variance spline
@@ -364,6 +363,9 @@ contains
         do tid = 1, nthreads
             call pcg32_init(rstate(tid), seed + 1000*tid)
         end do
+
+        ! Calculating the interpolation table using the given variance data
+        call generate_cspline(ns, sigma)
 
         ! Loading halo data a chunks from the input file
         n_halos_processed = 0
