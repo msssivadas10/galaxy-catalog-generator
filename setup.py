@@ -20,7 +20,7 @@ class BuildShared(build_ext):
         ]
         args = [ "-shared", "-fPIC", "-J", ".include", "-fopenmp" ]
         subprocess.check_call(
-            ["gfortran", *args, *files, "-o", "libpowerspectrum.so"]
+            ["gfortran", *args, *files, "-o", "./haloutils/libhm.so"]
         )
 
 setup(
