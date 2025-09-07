@@ -208,7 +208,7 @@ contains
         
     end function nfw_c
 
-    subroutine generate_galaxy_catalog(fid, seed, nthreads) bind(c)
+    subroutine generate_galaxy_catalog(fid, seed, nthreads, error) bind(c)
         !! Generate a galaxy catalog using the given halo catalog. 
         !! 
         !! **Notes:**
@@ -237,6 +237,9 @@ contains
         integer(c_int), intent(in), value :: nthreads
         !! Number of threads to use
 
+        integer(c_int), intent(out) :: error
+        !! Error code (0=success, 1=error)
+
         integer(c_int64_t), parameter :: chunk_size      = 10000
         integer(c_int64_t), parameter :: item_size_bytes = c_sizeof( &
             halodata_t(                                    &
@@ -258,6 +261,8 @@ contains
         integer(c_int64_t) :: n_halos_total, n_halos_processed, n_halos, n_galaxies
         type(halodata_t), allocatable :: hbuf(:)   ! Halo data
 
+        error = 1
+
         ! -- SETTING UP -- !
 
         ! Loading shared data from the workspace file. 
@@ -265,7 +270,6 @@ contains
         ! layout: `hmargs_t, bbox, ns, sigma` and arrays are stored in C
         ! order - not fortran order.
         call load_shared_workspace_(fid, bbox, hmargs, ns, sigma)
-        return
         
         ! Initialising the random number generator. This RNG works on a state 
         ! private to the thread, with a seed offset by the main seed. So, the 
@@ -338,6 +342,8 @@ contains
         write(fl, '(a)') 'END' ! sentinal to mark the end of log file
         close(fl) ! close log file
         
+        error = 0 ! everything worked as expected :)
+
     end subroutine generate_galaxy_catalog
 
     subroutine load_shared_workspace_(fid, bbox, hmargs, ns, sigma)

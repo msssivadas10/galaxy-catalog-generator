@@ -117,10 +117,11 @@ def test_galaxy_generation():
 
 def test_galaxy_generation2():
     from haloutils._core import lib, f8, i8, i4
+    from numpy.ctypeslib import ndpointer
     
     galaxydata_t = np.dtype([('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8'), ('typ', 'S1')])
 
-    lib.generate_galaxy_catalog.argtypes = [i8, i8, i4]
+    lib.generate_galaxy_catalog.argtypes = [i8, i8, i4, ndpointer(np.int32, ndim=0, flags="C_CONTIGUOUS")]
     lib.generate_galaxy_catalog.restype = None
 
     fid    = 0
@@ -150,8 +151,10 @@ def test_galaxy_generation2():
         hbuf.tofile(f)
         # print(hbuf) 
 
-    lib.generate_galaxy_catalog(fid, 123456, 4)
-
+    stat = np.array(1, dtype=np.int32)
+    lib.generate_galaxy_catalog(fid, 123456, 4, stat)
+    print(stat)
+    
     gbuf = np.fromfile(f'{fid}.gbuf.dat', dtype=galaxydata_t)
     # print(gbuf)
     # print(gbuf.shape)
@@ -188,15 +191,15 @@ def test_galaxy_generation2():
     plt.show()
 
 if __name__ == '__main__':
-    test_linear_growth()
-    test_power_spectrum()
-    test_variance()
-    test_correlation()
-    test_mass_function_models()
-    test_mass_function_tinker08()
-    test_bias_models()
-    test_galaxy_count()
-    test_shmf()
-    test_halo_concentration()
-    test_galaxy_generation()
+    # test_linear_growth()
+    # test_power_spectrum()
+    # test_variance()
+    # test_correlation()
+    # test_mass_function_models()
+    # test_mass_function_tinker08()
+    # test_bias_models()
+    # test_galaxy_count()
+    # test_shmf()
+    # test_halo_concentration()
+    # test_galaxy_generation()
     test_galaxy_generation2()
