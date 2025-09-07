@@ -405,8 +405,10 @@ def galaxy_catalog_generator(
         nthreads     : int   = -1 , 
         rseed        : int   = None,
     ) -> None:
-    # Complete galaxy catalog generation workflow.
-
+    r"""
+    Generate galaxy catalogs based on a halo catalog.
+    """
+    
     # Set M0 = Mmin, if not specified
     if m0 <= 0.: m0 = mmin 
     
