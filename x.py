@@ -116,70 +116,59 @@ def test_galaxy_generation():
     plt.show()
 
 def test_galaxy_generation2():
-    from haloutils._core import lib, i8, i4
+    from haloutils._core import lib, f8, i8, i4
     
-    hmargs_t = np.dtype([
-        ( 'lnm_min', '<f8' ), ( 'sigma_m'   , '<f8' ), ( 'lnm0'      , '<f8' ), ( 'lnm1' , '<f8' ),       
-        ( 'alpha'  , '<f8' ), ( 'scale_shmf', '<f8' ), ( 'slope_shmf', '<f8' ), ( 'z'    , '<f8' ),          
-        ( 'H0'     , '<f8' ), ( 'Om0'       , '<f8' ), ( 'Delta_m'   , '<f8' ), ( 'dplus', '<f8' ),      
-    ])
-    halodata_t   = np.dtype([('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8')])
     galaxydata_t = np.dtype([('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8'), ('typ', 'S1')])
 
     lib.generate_galaxy_catalog.argtypes = [i8, i8, i4]
     lib.generate_galaxy_catalog.restype = None
-    fid = 0
 
-    args = np.array((
-        hm.lnm_min, hm.sigma_m   , hm.lnm0      , hm.lnm1 ,       
-        hm.alpha  , hm.scale_shmf, hm.slope_shmf, hm.z    ,          
-        hm.H0     , hm.Om0       , hm.Delta_m   , hm.dplus,
-    ), dtype=hmargs_t)
-  
-    sigma      = np.zeros((101, 2))
-    sigma[:,0] = np.linspace(np.log(1e+08), np.log(1e+16), sigma.shape[0])
-    sigma[:,1] = ps.spectral_moment( hm.lagrangian_r(sigma[:,0]) )
-    sigma[:,1] = np.log(sigma[:,1]) / 2.
-    sigma      = sigma.astype('<f8')
-    bbox = np.array([[-100., -100., -100.], 
-                     [ 100.,  100.,  100.]]).astype('<f8')
-
+    fid    = 0
     m_halo = 1e+14
-    rng    = np.random.default_rng(12345)
-    hbuf   = np.zeros((100_000,), dtype=halodata_t)
-    hbuf['id']   = np.arange(1, hbuf.shape[0]+1).astype('<i8')
-    hbuf['pos']  = rng.uniform(bbox[0,:], bbox[1,:], (hbuf.shape[0], 3)).astype('<f8')
-    hbuf['mass'] = np.array(m_halo).astype('<f8')
-    # print(hbuf)
-    with open(f'{fid}.hbuf.dat', 'wb') as f:
-        hbuf.tofile(f)
-
+    x_min  = [-100., -100., -100.]
+    x_max  = [ 100.,  100.,  100.]
+    
     with open(f'{fid}.vars.dat', 'wb') as f:
-        args.tofile(f)
-        bbox.tofile(f)
-        np.array([ sigma.shape[0] ], dtype='<i8').tofile(f)
-        sigma.tofile(f)
-        
+        np.array(
+            tuple( hm.__getattribute__(field) for field, _ in hm._fields_ ), 
+            dtype=[(field, { f8: '<f8', i8: '<i8', i4: '<i4' }.get(_t)) for field, _t  in hm._fields_]
+        ).tofile(f)
+        np.array(
+            ( [x_min, x_max], ps._table.shape[0], 0, 101, np.log(1e+08), np.log(1e+16) ),
+            dtype=[('bbox', '<f8', (2, 3)), ('pktab_size', '<i8'), ('filt', '<i4'), 
+                   ('ns'  , '<i8'        ), ('lnma'      , '<f8'), ('lnmb', '<f8'),]
+        ).tofile(f)
+        ps._table.astype('<f8').tofile(f)
+    
+    with open(f'{fid}.hbuf.dat', 'wb') as f: 
+        RNG          = np.random.default_rng(12345)
+        n_halos      = 100_000
+        hbuf         = np.empty((n_halos,), dtype=[('id', '<i8'), ('pos', '<f8', 3), ('mass', '<f8')])
+        hbuf['id'  ] = np.arange(1, n_halos+1).astype('<i8')
+        hbuf['pos' ] = RNG.uniform(x_min, x_max, (n_halos, 3)).astype('<f8')
+        hbuf['mass'] = np.array(m_halo).astype('<f8')
+        hbuf.tofile(f)
+        # print(hbuf) 
+
     lib.generate_galaxy_catalog(fid, 123456, 4)
 
     gbuf = np.fromfile(f'{fid}.gbuf.dat', dtype=galaxydata_t)
     # print(gbuf)
     # print(gbuf.shape)
 
-    mask      = gbuf['typ'] == b'c'
-    central   = gbuf[mask]
-    satellite = gbuf[~mask]
+    mask = gbuf['typ'] == b'c'
+    central, satellite = gbuf[mask], gbuf[~mask]
 
-    halo_map   = { key: index for index, key in enumerate(central['id']) }
-    halo_order = [ halo_map[key] for key in satellite['id'] ]
-    bsize  = bbox[1,:] - bbox[0,:]
-    rdist  = central[halo_order]['pos'] - satellite['pos']
-    rdist -= bsize * np.rint(rdist / bsize)
-    rdist  = np.sqrt(np.sum(rdist**2, axis=-1))
-    r_vir  = np.exp( hm.lagrangian_r(np.log(m_halo)) )
-    c      = hm.halo_concentration(np.log(m_halo))
-    rs     = r_vir / c
-    bins   = np.logspace(np.log10(1e-3*r_vir), np.log10(r_vir), 50)
+    halo_map    = { key: index for index, key in enumerate(central['id']) }
+    halo_order  = [ halo_map[key] for key in satellite['id'] ]
+    bsize       = np.subtract(x_max, x_min)
+    rdist       = central[halo_order]['pos'] - satellite['pos']
+    rdist      -= bsize * np.rint(rdist / bsize)
+    rdist       = np.sqrt(np.sum(rdist**2, axis=-1))
+    r_vir       = np.exp( hm.lagrangian_r(np.log(m_halo)) )
+    c           = hm.halo_concentration(np.log(m_halo))
+    rs          = r_vir / c
+    bins        = np.logspace(np.log10(1e-3*r_vir), np.log10(r_vir), 50)
     hist, edges = np.histogram(rdist, bins=bins, density=True)
     centers     = 0.5*(edges[1:] + edges[:-1])
     rho_theory  = 1/(centers/rs*(1+centers/rs)**2)
@@ -188,11 +177,11 @@ def test_galaxy_generation2():
     plt.loglog(centers, rho_theory*centers**2, label='Theory')
     plt.show()
     
-    msat = satellite['mass'] 
-    bins = np.logspace(np.log10(1e-3*m_halo), np.log10(m_halo), 50)
+    msat        = satellite['mass'] 
+    bins        = np.logspace(np.log10(1e-3*m_halo), np.log10(m_halo), 50)
     hist, edges = np.histogram(msat, bins=bins, density=True)
-    centers = 0.5*(edges[1:] + edges[:-1])
-    rho_theory = hm.subhalo_massfunction(centers/m_halo, np.log(m_halo))
+    centers     = 0.5*(edges[1:] + edges[:-1])
+    rho_theory  = hm.subhalo_massfunction(centers/m_halo, np.log(m_halo))
     rho_theory /= np.trapz(rho_theory, centers) # normalize
     plt.loglog(centers, hist, label='Sampled')
     plt.loglog(centers, rho_theory, label='Theory')

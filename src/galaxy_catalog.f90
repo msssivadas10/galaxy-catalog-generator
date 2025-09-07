@@ -6,6 +6,7 @@ module galaxy_catalog_mod
     use iso_c_binding
     use constants_mod
     use halo_model_mod
+    use rfunctions_mod
     use interpolate_mod
     use random_mod
     implicit none
@@ -264,6 +265,7 @@ contains
         ! layout: `hmargs_t, bbox, ns, sigma` and arrays are stored in C
         ! order - not fortran order.
         call load_shared_workspace_(fid, bbox, hmargs, ns, sigma)
+        return
         
         ! Initialising the random number generator. This RNG works on a state 
         ! private to the thread, with a seed offset by the main seed. So, the 
@@ -271,9 +273,6 @@ contains
         do tid = 1, nthreads
             call pcg32_init(rstate(tid), seed + 1000*tid)
         end do
-
-        ! Calculating the interpolation table using the given variance data
-        call generate_cspline(ns, sigma)
 
         ! Allocate halo data buffer
         allocate( hbuf(chunk_size) )
@@ -351,8 +350,10 @@ contains
         real(c_double)    , intent(out), allocatable :: sigma(:,:)
 
         character(len=256) :: ifn
-        integer(c_int)     :: fi, ierr 
-        integer(c_int64_t) :: i   
+        integer(c_int)     :: fi, ierr, filt 
+        integer(c_int64_t) :: i, pktab_size 
+        real(c_double)     :: lnma, lnmb, lnm, delta_lnm, lnr, var
+        real(c_double), allocatable :: pktab(:,:)  
 
         fi = 9 ! file unit for input
         write(ifn, '(i0,".vars.dat")') fid ! filename for shared memory
@@ -362,18 +363,33 @@ contains
         if ( ierr /= 0 ) stop "error opening workspace file"
 
         ! The shared workspace memory is expected to have the following layout:
-        ! halo model arguments (hmargs_t), bounding box (float64[3, 2]), size 
-        ! of sigma table, ns (int64) and sigma table as float64[2, ns] array.
-        ! Array order is expected to be in C style (**not fortran**).
-        read(fi) hmargs
-        read(fi) bbox
-        read(fi) ns
-        allocate( sigma(3, ns) )
-        do i = 1, ns
-            ! Loading (lnm, lns) pairs in C order to the fortran array
-            read(fi) sigma(1:2, i)
+        read(fi) hmargs      ! first, the halo model args as `hmargs_t`...
+        read(fi) bbox        ! then, the bounding box: float64, shape(3, 2), C order...
+        read(fi) pktab_size  ! then, size of the power spectrum table: int64...
+        read(fi) filt        ! then, filter function code: int (0=tophat, 1=gaussian)
+        read(fi) ns          ! then, size of the sigma table: int64 
+        read(fi) lnma, lnmb  ! then, mass range for calculating sigma values (float64) 
+        
+        ! Finally, power spectrum table, as float64 array of shape (pktab_size, 2), 
+        ! in C order...
+        allocate( pktab(2, pktab_size) )
+        do i = 1, pktab_size
+            read(fi) pktab(1:2, i)
         end do
-    
+
+        ! Calculating the sigma table using the given power spectrum table 
+        allocate( sigma(3, ns) )
+        delta_lnm = (lnmb - lnma) / (ns - 1._c_double)
+        lnm       = lnma
+        do i = 1, ns
+            lnr = lagrangian_r(hmargs, lnm)
+            var = variance(lnr, 0_c_int, 0_c_int, filt, pktab, pktab_size, 2_c_int)
+            sigma(:, i) = [ lnm, 0.5_c_double*log(var) ]
+            lnm = lnm + delta_lnm
+        end do
+        call generate_cspline(ns, sigma) ! creating cubic spline for interpolation
+
+        deallocate( pktab ) 
         close(fi)
         
     end subroutine load_shared_workspace_
