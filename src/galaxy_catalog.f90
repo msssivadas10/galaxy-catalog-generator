@@ -324,8 +324,8 @@ contains
             )
 
             n_halos_processed = n_halos_processed + n_halos
-            write(fl, '("used ",i0," of ",i0," halos, generated ",i0," galaxies")') &
-                n_halos_processed, n_halos_total, n_galaxies
+            write(fl, '("generated ",i0," galaxies from ",i0," halos out of ",i0)') &
+                n_galaxies, n_halos_processed, n_halos_total
             
         end do
 
@@ -338,6 +338,7 @@ contains
         ! Merge data from all the temporary files to the specified output file
         write(fl, '(a)') 'merging data from temporary files...'
         call merge_data_from_threads_(fid, nthreads)
+        write(fl, '(a)') 'galaxy catalog generation completed.'
         
         write(fl, '(a)') 'END' ! sentinal to mark the end of log file
         close(fl) ! close log file
