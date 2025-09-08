@@ -61,12 +61,12 @@ contains
 
         error_code = 1
         if ( product(box%gridsize) /= ncells ) stop "mismatch in gridsize and ncells"
-
+        
         ! Setting up...
         box%cellsize = box%boxsize / box%gridsize 
         allocate( cell_index(npts) )
         do i = 1, ncells
-            grid_info(j)%count = 0_c_int64_t ! initialise all count to 0
+            grid_info(i)%count = 0_c_int64_t ! initialise all count to 0
         end do
         
         call omp_set_num_threads(nthreads) ! set number of threads
