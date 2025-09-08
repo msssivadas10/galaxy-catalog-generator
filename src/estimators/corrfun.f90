@@ -3,15 +3,17 @@ module corrfun_mod
 
     use omp_lib
     use iso_c_binding
-    use iso_fortran_env, only: stdout => output_unit
     implicit none
 
     private
     public :: build_grid_hash
 
     type, public, bind(c) :: cinfo_t
-        integer(c_int64_t) :: start 
-        integer(c_int64_t) :: count    
+        !! A struct containing information about a grid cell. This, used 
+        !! along with a sequence of point index blocks, can be used as an
+        !! efficient spatial hash.    
+        integer(c_int64_t) :: start !! Start index of a block
+        integer(c_int64_t) :: count !! Size of the block  
     end type cinfo_t
 
     type, public, bind(c) :: boxinfo_t
