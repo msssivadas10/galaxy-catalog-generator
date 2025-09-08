@@ -190,6 +190,62 @@ def test_galaxy_generation2():
     plt.loglog(centers, rho_theory, label='Theory')
     plt.show()
 
+def test_corrfunc():
+    import ctypes as ct, numpy.ctypeslib as nct
+
+    lib = nct.load_library("libstm", "./haloutils")
+
+    boxinfo_t = [(" boxsize", "f8", 3), ("origin", "f8", 3), ("gridsize", "i8", 3), ("cellsize", "f8", 3)]
+    cinfo_t = [("start", "i8"), ("count", "i8")]
+    lib.build_grid_hash.restype  = None
+    lib.build_grid_hash.argtypes = [
+        ct.c_int64,                                         # npts
+        nct.ndpointer(np.float64, 2, flags="C_CONTIGUOUS"), # pos
+        nct.ndpointer(boxinfo_t, 0, flags="C_CONTIGUOUS"),  # box
+        ct.c_int64,                                         # ncells
+        nct.ndpointer(cinfo_t, 1, flags="C_CONTIGUOUS"),    # grid_info
+        nct.ndpointer(np.int64, 1, flags="C_CONTIGUOUS"),   # index_list
+        ct.c_int,                                           # nthreads
+        ct.POINTER(ct.c_int),                               # error_code
+    ]
+
+    npts = 10
+    origin  = [ 0.,  0.,  0.]
+    boxsize = [10., 10., 10.]
+    gridsize = [4, 4, 4]
+    ncells = gridsize[0]*gridsize[1]*gridsize[2]
+
+    rng  = np.random.default_rng(123456)
+    pos  = rng.uniform(origin, boxsize, (npts, 3))
+
+    cellsize   = np.array(boxsize) / np.array(gridsize )
+    cell       = ( ( pos - np.array(origin) ) / cellsize ).astype('i8')
+    cell_index = cell[:,0] + gridsize[0]*( cell[:,1] + gridsize[1]*cell[:,2] )
+    count = np.zeros(ncells, 'i8')
+    for i in cell_index: count[i] += 1
+    start = np.zeros(ncells, 'i8')
+    start[0] = 0
+    for i in range(1, ncells): start[i] = start[i-1] + count[i-1]
+    index_list = np.zeros(npts, 'i8')
+    offset = np.zeros(ncells, 'i8')
+    for i in range(npts):
+        j = cell_index[i]
+        p = offset[j]
+        offset[j] += 1
+        index_list[ start[j] + p ] = i
+
+    index_list2 = np.zeros(npts, 'i8')
+    grid_info = np.zeros(ncells, cinfo_t)
+    box = np.array((boxsize, origin, gridsize, [0., 0., 0.]), boxinfo_t)
+    error = ct.c_int(-1)
+    lib.build_grid_hash(npts, pos, box, ncells, grid_info, index_list2, 4, ct.byref(error))
+
+    # print(cell_index)
+    # print(index_list)
+    # print(index_list2-1)
+    print(np.allclose(start, grid_info["start"]-1))
+    print(np.allclose(grid_info["count"], count))
+
 if __name__ == '__main__':
     # test_linear_growth()
     # test_power_spectrum()
@@ -202,4 +258,5 @@ if __name__ == '__main__':
     # test_shmf()
     # test_halo_concentration()
     # test_galaxy_generation()
-    test_galaxy_generation2()
+    # test_galaxy_generation2()
+    test_corrfunc()
