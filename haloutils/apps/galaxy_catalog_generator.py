@@ -145,8 +145,9 @@ def _prepare_abacus_workspace(
     z_target   = meta["Redshift"]
     z_pk       = meta['ZD_Pk_file_redshift'] 
     dplus_tab  = meta['GrowthTable']
-    dplus_at_z = dplus_tab[z_target] / dplus_tab[z_pk] # growth factor at z
+    dplus_at_z = dplus_tab[z_target] / dplus_tab[z_pk] # growth factor at z, w.r.to z_pk
     pktab[:,1] = pktab[:,1] + 2*np.log(dplus_at_z)     # interpolate power spectrum to z
+    dplus_at_z = dplus_tab[z_target] / dplus_tab[0.0]  # growth factor at z, w.r.to 0
 
     # Halo model arguments 
     hmargs = {
