@@ -32,7 +32,6 @@ def parse_fortran_file(filepath):
 
     return module_name, used_modules
 
-
 def scan_fortran_sources(root_dir, extensions=(".f90", ".F90")):
     # Return a dict mapping file paths to (module_name, used_modules).
     result = {}
@@ -43,7 +42,6 @@ def scan_fortran_sources(root_dir, extensions=(".f90", ".F90")):
                 mod, uses = parse_fortran_file(fpath)
                 if mod: result[fpath] = (mod, uses)
     return result
-
 
 def build_dependency_graph(root_dir):
     # Build a dependency graph mapping file -> (module, [dependent files]).
