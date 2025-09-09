@@ -1,12 +1,13 @@
-module corrfun_mod
-    !! Pair counting and 2-point correlation function calculations.
-
+module spatial_hash_mod
+    !! Spatial hashing for fast pair counting. Also, contains routines
+    !! for spatial statistics calculation.
+    
     use omp_lib
     use iso_c_binding
     implicit none
 
     private
-    public :: build_grid_hash
+    public :: build_grid_hash, get_grid_stats
 
     type, public, bind(c) :: cinfo_t
         !! A struct containing information about a grid cell. This, used 
@@ -23,6 +24,16 @@ module corrfun_mod
         integer(c_int64_t) :: gridsize(3) !! Number of cells on each direction
         real(c_double)     :: cellsize(3) !! Size of the cell along each direction
     end type boxinfo_t
+
+    type, public, bind(c) :: gstats_t
+        !! A struct storing grid statistics
+        integer(c_int64_t) :: count !! Number of cells
+        integer(c_int64_t) :: min   !! Minimum value
+        integer(c_int64_t) :: max   !! Maximum value
+        integer(c_int64_t) :: empty !! Number of cells that are empty
+        real(c_double)     :: avg   !! Average 
+        real(c_double)     :: var   !! Variance
+    end type gstats_t
     
 contains
 
@@ -213,94 +224,82 @@ contains
 
     end subroutine build_grid_hash
 
-    subroutine count_pairs(auto, periodic, nr, rbins, counts, ncells, box, &
-                           npts1, pos1, index_list1, grid_info1,           & ! set-1 
-                           npts2, pos2, index_list2, grid_info2,           & ! set-2
-                           error_code                                      & 
-        ) bind(c)
-        !! Count number of pairs between two sets of points.
-
-        integer(c_int), intent(in), value :: auto
-        !! Flag indicating pair counting between same sets of points
-        
-        integer(c_int), intent(in), value :: periodic
-        !! Flag for using periodic boundary conditions
-
-        integer(c_int64_t), intent(in), value :: nr   
-        !! Size of distance bins array and count array
-
-        real(c_double), intent(in) :: rbins(nr)
-        !! Distance bin edges
-
-        integer(c_int64_t), intent(out) :: counts(nr)
-        !! Pair counts (last item will be 0 always).
+    subroutine get_grid_stats(ncells, grid_info, nthreads, stats, error_code) bind(c)
+        !! Calculate cell statistics  
 
         integer(c_int64_t), intent(in), value :: ncells
-        !! Number of cells in the grid (same for both sets).
+        !! Number of cells in the grid - must be equal to `product(gridsize)`
 
-        type(boxinfo_t), intent(in) :: box
-        !! Details about the space (both sets must be in the same box)
+        type(cinfo_t), intent(in) :: grid_info(ncells)
+        !! Grid data - start index and size of each cell group. 
 
-        integer(c_int64_t), intent(in), value :: npts1
-        !! Number of points in set-1
+        integer(c_int), intent(in), value :: nthreads
+        !! Number of threads to use
 
-        real(c_double), intent(in) :: pos1(3, npts1)
-        !! Set-1 positions
+        type(gstats_t), intent(inout) :: stats
+        !! Grid statistics
 
-        integer(c_int64_t), intent(in) :: index_list1(npts1)
-        !! Sorted cell index list for set-1
-
-        type(cinfo_t), intent(in) :: grid_info1(ncells)
-        !! Grid specification for set-1
-
-        integer(c_int64_t), intent(in) :: npts2
-        !! Number of points in set-2
-
-        real(c_double), intent(in) :: pos2(3, npts2)
-        !! Set-2 positions
-
-        integer(c_int64_t), intent(in) :: index_list2(npts2)
-        !! Sorted cell index list for set-2
-
-        type(cinfo_t), intent(in) :: grid_info2(ncells)
-        !! Grid specification for set-2
-        
         integer(c_int), intent(out) :: error_code
         !! Error code (0=success, 1=error)
 
-        integer(c_int64_t) :: j1, cell1(3), delta(3), crange(3, 2)
+        integer(c_int64_t) :: tid, j, n_total
+        real(c_double)     :: delta1, delta2
+        type(gstats_t), allocatable :: st(:)
 
         error_code = 1
+        call omp_set_num_threads(nthreads)
 
-        ! Number of cells to check on each direction 
-        delta = ceiling( rbins(nr) / box%cellsize ) 
-
-        do j1 = 1, ncells
-
-            if ( grid_info1(j1)%count < 1 ) cycle ! Cell is empty
-            
-            ! Finding 3D cell index from flat index
-            cell1(1) = modulo( j1, box%gridsize(1) ); cell1(3) = j1 / box%gridsize(1) 
-            cell1(2) = modulo( cell1(3), box%gridsize(2) )
-            cell1(3) = cell1(3) / box%gridsize(2)
-
-            crange(:,1) = cell1 - delta
-            crange(:,2) = cell1 + delta
-            if ( periodic /= 0 ) then
-                ! Using periodic boundary conditions: wrap around if the cell index 
-                ! is outside range. 
-                crange(:,1) = modulo( crange(:,1)-1, box%gridsize ) + 1
-                crange(:,2) = modulo( crange(:,2)-1, box%gridsize ) + 1
-            else
-                ! No periodic wrapping: clip the value between 0 and gridsize
-                crange(:,1) = max( min( 0_c_int64_t, crange(:,1) ), box%gridsize )
-                crange(:,2) = max( min( 0_c_int64_t, crange(:,2) ), box%gridsize )
-            end if
-
+        ! Get stats on blocks: average and variance are calculated using 
+        ! Welford's online algorithm, per thread. These values are combined to
+        ! get the actual values at the end. 
+        ! Ref: <https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance>.
+        allocate( st(nthreads) )
+        do tid = 1, nthreads
+            st(tid)%count =  0_c_int64_t
+            st(tid)%min   = huge( st(tid)%min )
+            st(tid)%max   = -1_c_int64_t
+            st(tid)%empty =  0_c_int64_t
+            st(tid)%avg   =  0._c_double
+            st(tid)%var   =  0._c_double
         end do
 
-        error_code = 0
-            
-    end subroutine count_pairs
+        !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(tid, j, delta1, delta2)
+        tid = omp_get_thread_num() + 1
 
-end module corrfun_mod
+        !$OMP DO SCHEDULE(static)
+        do j = 1, ncells
+            st(tid)%count = st(tid)%count + 1
+            delta1        = grid_info(j)%count - st(tid)%avg
+            st(tid)%avg   = st(tid)%avg + delta1 / dble( st(tid)%count )
+            delta2        = grid_info(j)%count - st(tid)%avg
+            st(tid)%var   = st(tid)%var + delta1*delta2
+            st(tid)%min   = min( st(tid)%min, grid_info(j)%count )
+            st(tid)%max   = max( st(tid)%max, grid_info(j)%count )
+            if ( grid_info(j)%count < 1 ) st(tid)%empty = st(tid)%empty + 1
+        end do
+        !$OMP END DO
+        !$OMP END PARALLEL
+        
+        ! Merging the stats on blocks
+        stats = st(1)
+        do tid = 2, nthreads
+            if ( st(tid)%count > 0 ) then
+                n_total     = st(tid)%count + stats%count 
+                delta1      = st(tid)%avg   - stats%avg
+                stats%avg   = stats%avg + delta1 * dble(st(tid)%count) / dble(n_total)
+                stats%var   = stats%var + st(tid)%var &
+                                + delta1**2 * dble(stats%count*st(tid)%count) / dble(n_total)
+                stats%count = n_total
+                stats%empty = st(tid)%empty + stats%empty
+            end if
+            stats%min = min( stats%min, st(tid)%min )
+            stats%max = max( stats%max, st(tid)%max )
+        end do
+        stats%var = stats%var / dble(stats%count) ! biased sample variance
+        
+        deallocate( st )
+        error_code = 1
+
+    end subroutine get_grid_stats
+    
+end module spatial_hash_mod
