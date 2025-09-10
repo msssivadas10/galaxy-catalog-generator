@@ -5,6 +5,9 @@ module pair_utils_mod
     use iso_c_binding
     use spatial_hash_mod
     implicit none
+
+    private
+    public :: enumerate_cell_pairs, to_3d_index, to_flat_index, apply_bc
     
 contains
 
@@ -46,102 +49,165 @@ contains
         !! Number of threads to use
         
         integer(c_int), intent(out) :: error_code
-        !! Error code (0=success, 1=error)
+        !! Error code (0=success, 1=error, 2=cellsize mismatch, 3=gridsize mismatch)
 
-        real(c_double), parameter :: F = 1000._c_double
+        integer(c_int64_t) :: count_th(2), delta(3)
 
-        real(c_double)     :: navg1, navg2
-        integer(c_int64_t) :: j1, j2, kcells, k
-        integer(c_int64_t) :: delta(3), cell1(3), cell2(3), cstart(3), cstop(3)
-        integer(c_int)     :: tid, fu, fp1, fp2, iostat, dense
-        character(256)     :: fn
+        ! Check gridsize and total number of cells matching:
+        error_code = 3
+        if ( product(box%gridsize) /= ncells ) return
 
-        error_code = 1
-        if ( product(box%gridsize) /= ncells ) stop "mismatch in gridsize and ncells"
+        ! Check gridsize and cellsize matching:
+        error_code = 2
+        if (any(abs(box%cellsize - box%boxsize / box%gridsize) > 1e-08_c_double)) return
         
-        ! Average cell counts
-        navg1 = dble(npts1) / ncells ! for set-1
-        navg2 = dble(npts2) / ncells ! for set-2
+        error_code = 1
+        
+        ! Over-population thresholds: using 100 times average count.
+        count_th = floor( 100*dble([ npts1, npts2 ]) / ncells, kind=c_int64_t )
         
         ! Specify the number of neighbours to check on each direction. If the
         ! 3D cell index is`c[i]` for axis i, then the neighbour cell indices 
         ! runs from `c[i] - delta[i]` to `c[i] + delta[i]` (BC applied). 
         delta = ceiling( rmax / box%cellsize ) 
 
-       !$OMP  PARALLEL DEFAULT(SHARED) &
-       !$OMP& PRIVATE(tid, j1, j2, k, cell1, cell2, cstart, cstop, dense, fu, fn)
+        call distribute_enumeration(pid, periodic, count_th, box%gridsize, &
+                                    delta, ncells, grid_info1, grid_info2  &
+        )
+        call merge_pair_lists(pid, nthreads)
+        
+        error_code = 0
+        
+    end subroutine enumerate_cell_pairs
 
+    subroutine distribute_enumeration(pid, periodic, count_th, gridsize, delta,  &
+                                      ncells, grid_info1, grid_info2             &
+        )
+        !! Enumerate the cell pairs in parallel. Each thread will write the 
+        !! pairs it found to a binary stream `pid.tid.cpstack.tmp`. Each item
+        !! in the stream will be a tuple of cell indices (int64) and a flag
+        !! if any of the cells are overpopulated (int32): i.e., a sequence 
+        !! of `(i1,j2,f1), (i2,j2,f2)...`.
+
+        integer(c_int64_t), intent(in) :: pid                !! Process ID
+        integer(c_int)    , intent(in) :: periodic           !! Periodic BC flag
+        integer(c_int64_t), intent(in) :: count_th(2)        !! Over-population threshold 
+        integer(c_int64_t), intent(in) :: gridsize(3)        !! Size of the grid
+        integer(c_int64_t), intent(in) :: delta(3)           !! Nearby-cell-range specifier
+        integer(c_int64_t), intent(in) :: ncells             !! Number of cells
+        type(cinfo_t)     , intent(in) :: grid_info1(ncells) !! Grid-1
+        type(cinfo_t)     , intent(in) :: grid_info2(ncells) !! Grid-2
+
+        character(256)     :: fn
+        integer(c_int)     :: tid, fu, dens
+        integer(c_int64_t) :: j1, j2, c1(3), c2(3), cstart(3), cstop(3), k, kstop
+
+        !$OMP  PARALLEL DEFAULT(SHARED) &
+        !$OMP& PRIVATE(tid, dens, j1, j2, c1, c2, cstart, cstop, k, kstop, fu, fn)
+        
+        ! Open a temp file to save the pairs found from this thread: 
         tid = omp_get_thread_num() + 1 ! thread ID 
         fu  = 10 + tid ! file unit for this thread
-        write( fn, '(i0,".",i0,".cpstack.tmp")' ) pid, tid ! filename for this thread
+        write( fn, '(i0,".",i0,".cplist.tmp")' ) pid, tid ! filename for this thread
         open(newunit=fu, file=fn, access='stream', form='unformatted',      &
              convert='little_endian', status='unknown', position='append',  &
              action='write'                                                 &
         )
 
-       !$OMP DO SCHEDULE(static)
+        !$OMP DO SCHEDULE(static)
         do j1 = 1, ncells
 
             if ( grid_info1(j1)%count < 1 ) cycle ! cell is empty
             
             ! Converting the flat cell index to 3D index
-            cell1 = to_3d_index( j1, box%gridsize )
+            c1 = to_3d_index( j1, gridsize )
 
             ! Find the range of indices for the neighbouring cells. Periodic 
             ! wrapping is used if using a periodic BC. Otherwise, the values 
             ! are clipped to the range [0, gridsize-1].  
-            cstart = cell1 - delta; call apply_bc(cstart, box%gridsize, periodic)
-            cstop  = cell1 + delta; call apply_bc(cstop , box%gridsize, periodic)
+            cstart = c1 - delta; call apply_bc(cstart, gridsize, periodic)
+            cstop  = c1 + delta; call apply_bc(cstop , gridsize, periodic)
 
-            if ( grid_info1(j1)%count > F*navg1 ) then
-                ! This cell contains much larger items, than an average cell have.
-                ! To avoid any thread get stuck here, all cell pairs including this 
-                ! one are kept for special handling.
-                dense = 1_c_int
+            if ( grid_info1(j1)%count > count_th(1) ) then
+                ! This cell is over-populated, based on the given over-population 
+                ! threshold (usually 1000 x average count). When parallely counting
+                ! pairs over cells, threads handling those cells will take longer
+                ! time to complete. So, for these cells, pair counting is done 
+                ! over the points, which is the better way!    
+                dens = 1_c_int
             else 
-                dense = 0_c_int
+                dens = 0_c_int
             end if
 
             ! Walking through the neighbouring cells to make pairs:
-            kcells = product(cstop - cstart + 1) ! number of neighbouring cells
-            cell2  = cstart
-            do k = 1, kcells
+            kstop = product(cstop - cstart + 1) ! number of neighbouring cells
+            c2  = cstart
+            do k = 1, kstop
 
                 ! Converting the 3D cell index to a flat index
-                j2 = to_flat_index( cell2, box%gridsize )
+                j2 = to_flat_index( c2, gridsize )
 
-                if ( grid_info2(j2)%count > 0 ) then 
-                    if (( dense == 1 ) .or. ( grid_info2(j2)%count > F*navg2 )) then
-                        ! Either this cell or the main cell is over-populated. 
-                        write(fu) j1, j2, 1_c_int  ! cell pair with spacial handleing
+                if ( grid_info2(j2)%count > 0 ) then
+                    ! The combined over-population flag will be set based on the  
+                    ! count in this cell. The value written to the file is that of
+                    ! the combined flag: `dens .or. dens_other`  
+                    if ( grid_info2(j2)%count > count_th(2) ) then
+                        ! This cell is over-populated, and keep for special handling. 
+                        write(fu) j1, j2, 1_c_int
                     else
-                        write(fu) j1, j2, 0_c_int ! normal cell pair
-                    end if
-                end if
+                        write(fu) j1, j2, dens   
+                    end if 
+                end if                
                 
-                ! Incrementing the cell indices
-                cell2(1) = cell2(1) + 1
-                if ( cell2(1) > cstop(1) ) then
-                    cell2(1) = cstart(1)
-                    cell2(2) =  cell2(2) + 1
-                    if ( cell2(2) > cstop(2) ) then
-                        cell2(2) = cstart(2)
-                        cell2(3) =  cell2(3) + 1
-                    end if
-                end if
-
+                call increment_counter3( c2, cstart, cstop ) ! to next cell...
             end do
 
-        end do
-       !$OMP END DO
+        end do 
+        !$OMP END DO
 
         close(fu)
 
-       !$OMP END PARALLEL
+        !$OMP END PARALLEL
+
+    end subroutine distribute_enumeration
+
+    subroutine increment_counter3(c, cstart, cstop)
+        !! Increment a 3D index counter `c` running from `cstart` to `stop`.  
+        !! This is used for flattening nested do loops.
+        integer(c_int64_t), intent(in)    :: cstart(3), cstop(3)
+        integer(c_int64_t), intent(inout) :: c(3)
+
+        ! First index is the faster changing one. If one index reached the 
+        ! stop value, it is reset to the start value and the next index is 
+        ! incremented. This is repeated until the last index reach its stop 
+        ! value...
+        c(1) = c(1) + 1
+        if ( c(1) > cstop(1) ) then
+            c(1) = cstart(1)     
+            c(2) = c(2) + 1
+            if ( c(2) > cstop(2) ) then
+                c(2) = cstart(2) 
+                c(3) = c(3) + 1
+            end if
+        end if
+    
+    end subroutine increment_counter3
+
+    subroutine merge_pair_lists(pid, nthreads)
+        !! Merge pair lists from temp files created by threads into two
+        !! files, one for cell pairs with normal population `pid.cplist.bin`
+        !! and one for over-populated cell pairs `pid.cplist.spl.bin`. All 
+        !! temporary files will be deleted. 
+        integer(c_int64_t), intent(in) :: pid
+        integer(c_int)    , intent(in) :: nthreads
+
+        integer(c_int64_t) :: j1, j2
+        integer(c_int)     :: tid, fu, fp1, fp2, iostat, dens
+        character(256)     :: fn
 
         ! File for normal cell pair stack 
         fp1 = 8
-        write( fn, '(i0,".cpstack.bin")' ) pid 
+        write( fn, '(i0,".cplist.bin")' ) pid 
         open(newunit=fp1, file=fn, access='stream', form='unformatted',     &
              convert='little_endian', status='replace', position='append',  &
              action='write'                                                 &
@@ -149,7 +215,7 @@ contains
         
         ! File for special cell pair stack
         fp2 = 9
-        write( fn, '(i0,".cpstack.spl.bin")' ) pid 
+        write( fn, '(i0,".cplist.spl.bin")' ) pid 
         open(newunit=fp2, file=fn, access='stream', form='unformatted',     &
              convert='little_endian', status='replace', position='append',  &
              action='write'                                                 &
@@ -158,17 +224,17 @@ contains
         ! Combining the individual stacks from threads
         do tid = 1, nthreads
             fu  = 10 + tid ! file unit for this thread
-            write( fn, '(i0,".",i0,".cpstack.tmp")' ) pid, tid ! filename for this thread
+            write( fn, '(i0,".",i0,".cplist.tmp")' ) pid, tid ! filename for this thread
             open(newunit=fu, file=fn, access='stream', form='unformatted', &
                  convert='little_endian', status='old', action='read'      &
             )
             do 
-                read(fu, iostat=iostat) j1, j2, dense
+                read(fu, iostat=iostat) j1, j2, dens
                 if ( iostat /= 0 ) exit ! EOF or error
-                if ( dense == 1 ) then
-                    write(fp2) j1, j2 ! to special (dense) pair stack
+                if ( dens == 1 ) then
+                    write(fp2) j1, j2 ! to over-populated pair list
                 else
-                    write(fp1) j1, j2 ! to normal pair stack
+                    write(fp1) j1, j2 ! to normal pair list
                 end if                 
             end do
             close(fu, status='delete') ! file is deleted on close 
@@ -177,9 +243,7 @@ contains
         close(fp1)
         close(fp2)
         
-        error_code = 0
-        
-    end subroutine enumerate_cell_pairs
+    end subroutine merge_pair_lists
 
 ! Helper functions
 
