@@ -1,263 +1,341 @@
 module pair_counting_mod
-    !! Pair counting and 2-point correlation function calculations.
-
+    
     use omp_lib
     use iso_c_binding
     use spatial_hash_mod
+    use pair_utils_mod
     implicit none
 
     private
     public :: count_pairs
     
-    integer(c_int), parameter :: POINT_PARALLEL = 2
-    integer(c_int), parameter :: CELLS_PARALLEL = 1
-
 contains
 
-    subroutine get_parallel_strategy(auto, ncells, grid_info1, grid_info2, nthreads, &
-                                     strategy, used_set                              &
-        ) 
-        !! Select an efficient strategy for parallelization, based on grid 
-        !! statistics.
+    subroutine count_pairs(pid, auto, periodic,                 &
+                           box, nr, rbins, cnts, ncells,        &
+                           npts1, grid_info1, grid_data1, pos1, &
+                           npts2, grid_info2, grid_data2, pos2, &
+                           nthreads, error_code                 &
+        ) bind(c)
+        !! Count the number of pairs between two sets of points, given their grid
+        !! hash representation.
 
-        integer(c_int), intent(in), value :: auto
-        !! Auto correlation flag: 1=both sets are same.
-
-        integer(c_int64_t), intent(in), value :: ncells
-        !! Number of cells in the grid - must be equal to `product(gridsize)`
-
-        ! integer(c_int64_t), intent(in), value :: npts1
-        ! !! Number of points in set-1
+        integer(c_int64_t), intent(in), value :: pid
+        !! Process ID
         
-        ! integer(c_int64_t), intent(in), value :: npts2
-        ! !! Number of points in set-2
-
-        type(cinfo_t), intent(in) :: grid_info1(ncells)
-        !! Grid data (set-1) - start index and size of each cell group. 
-
-        type(cinfo_t), intent(in) :: grid_info2(ncells)
-        !! Grid data (set-2) - start index and size of each cell group. 
+        integer(c_int), intent(in), value :: auto
+        !! Flag for taking auto correlation (if both sets are same)
+     
+        integer(c_int), intent(in), value :: periodic
+        !! Flag for using periodic boundary conditions
+        
+        integer(c_int64_t), intent(in), value :: nr        
+        real(c_double)    , intent(in)        :: rbins(nr) 
+        !! Distance bin edges
+        
+        integer(c_int64_t), intent(out) :: cnts(:)
+        !! Pair counts array: must have size `nr-1`
+        
+        integer(c_int64_t), intent(in), value :: ncells
+        !! Number of cells in the grid (same for both sets).
+        
+        type(boxinfo_t), intent(in) :: box
+        !! Details about the space (both sets must be in the same box)
+        
+        ! -- Points and grid for set-1:
+        integer(c_int64_t), intent(in), value :: npts1              !! Number of points (1)    
+        real(c_double)    , intent(in)        :: pos1(3,npts1)      !! Position buffer (1)    
+        integer(c_int64_t), intent(in)        :: grid_data1(npts1)  !! Grid representation (1)
+        type(cinfo_t)     , intent(in)        :: grid_info1(ncells) !! Grid details (1)        
+        
+        ! -- Points and grid for set-2:
+        integer(c_int64_t), intent(in), value :: npts2              !! Number of points (2)      
+        real(c_double)    , intent(in)        :: pos2(3,npts2)      !! Position buffer (2)      
+        integer(c_int64_t), intent(in)        :: grid_data2(npts2)  !! Grid representation (2)  
+        type(cinfo_t)     , intent(in)        :: grid_info2(ncells) !! Grid details (2)          
 
         integer(c_int), intent(in), value :: nthreads
         !! Number of threads to use
-
-        integer(c_int), intent(out) :: strategy
-        !! Strategy (1=over cells, 2=over points, -99=error)
-
-        integer(c_int), intent(out) :: used_set
-        !! Select the set to parallelize
-
-        type(gstats_t) :: stats(2)
-        integer(c_int) :: error_code, set
-        real(c_double) :: f_empty(2), cv(2), r(2), score(2)
-
-        strategy = -99
-
-        ! Get stats for set-1
-        call get_grid_stats(ncells, grid_info1, nthreads, stats(1), error_code)
-        if ( error_code /= 0 ) return 
-        
-        ! Get stats for set-2
-        if ( auto /= 1 ) then
-            ! Both sets are same: reuse the stats
-            stats(2) = stats(1)
-        else
-            call get_grid_stats(ncells, grid_info2, nthreads, stats(2), error_code)
-            if ( error_code /= 0 ) return 
-        end if
-
-        ! Calculate some indicators
-        do set = 1, 2
-            ! Fraction of empty cells:
-            f_empty(set) = dble(stats(set)%empty) / dble(stats(set)%count)
-    
-            ! Coefficient of variation:
-            cv(set) = sqrt(stats(set)%var) / stats(set)%avg
-
-            ! Max to mean ratio:
-            r(set) = dble(stats(set)%max) / stats(set)%avg
-
-        end do
-        
-        ! Weighted score based on these stats: set with lowest score is 
-        ! selected:
-        score = f_empty + cv + log(1._c_double + r)
-        if ( score(1) <= score(2) ) then
-            used_set = 1
-        else
-            used_set = 2
-        end if
-
-        ! Deciding strategy, based on the set used
-        if ( f_empty(used_set) > 0.7_c_double ) then
-            ! Set is more sparse: parallelise over points
-            strategy = POINT_PARALLEL
-        else if ( cv(used_set) < 0.5_c_double ) then
-            ! Counts are more uniform among cells: parallelize over cells
-            ! is the best strategy
-            strategy = CELLS_PARALLEL
-        else
-            ! Default strategy is to parallelize over cells, unless there are 
-            ! some cells with unusually large counts...
-            if ( R(used_set) > 1000._c_double ) then
-                strategy = POINT_PARALLEL
-            else
-                strategy = CELLS_PARALLEL
-            end if 
-        end if
-
-        ! Look for cell wth count, much much larger than the average value. 
-        ! For such cell pairs, a parallel loop over points is used, so that
-        ! a thread will not get a huge number of points to look for...
-        if ( strategy == POINT_PARALLEL ) then
-            ! Parallelization already over points - no need to look for
-            ! special cells, to parallelize over points.
-            return
-        end if
-        
-    end subroutine get_parallel_strategy
-
-    subroutine convert_to_3d_index(gridsize, j, cell)
-        !! Calculate the 3D cell indices from a flat index.
-        integer(c_int64_t), intent(in)  :: gridsize(3), j
-        integer(c_int64_t), intent(out) :: cell(3)
-    
-        ! Using `flat index = c1 + gs1(c2 + gs2*c3)`...
-        cell(1) = modulo( j, gridsize(1) ); cell(3) = j / gridsize(1) 
-        cell(2) = modulo( cell(3), gridsize(2) )
-        cell(3) = cell(3) / gridsize(2)
-        
-    end subroutine convert_to_3d_index
-    
-    function convert_to_flat_index(gridsize, cell) result(j)
-        !! Calculate the flat index from 3D cell indices.
-        integer(c_int64_t), intent(in) :: gridsize(3), cell(3)
-        integer(c_int64_t) :: j
-    
-        ! Using `flat index = c1 + gs1(c2 + gs2*c3)`...
-        j = cell(1) + gridsize(1)*( cell(2) + gridsize(2)*cell(3) )
-
-    end function convert_to_flat_index
-
-    function apply_bc(cell, gridsize, periodic) result(cell_bc)
-        !! Apply a periodic boundary condition to the cell index.
-        integer(c_int)    , intent(in) :: periodic
-        integer(c_int64_t), intent(in) :: gridsize(3), cell(3)
-        integer(c_int64_t) :: cell_bc(3)
-    
-        if ( periodic /= 0 ) then
-            ! Using periodic boundary conditions: wrap around if the cell  
-            ! index is outside range. 
-            cell_bc = modulo( cell-1, gridsize ) + 1
-        else
-            ! No periodic wrapping: clip the value between 0 and gridsize
-            cell_bc = max( min( 0_c_int64_t, cell ), gridsize )
-        end if
-        
-    end function apply_bc
-
-    subroutine count_pairs_sequential(n1, pos1, n2, pos2, nr, rbins, counts)
-        !! Count number of pairs from two sets of points in sequential 
-        !! order.
-        integer(c_int64_t), intent(in)  :: n1, n2, nr
-        real(c_double)    , intent(in)  :: pos1(3,n1), pos2(3,n2), rbins(nr)
-        integer(c_int64_t), intent(out) :: counts(nr)
-    
-        
-    end subroutine count_pairs_sequential
-
-    subroutine count_pairs(auto, periodic, nr, rbins, counts, ncells, box, &
-                           npts1, pos1, index_list1, grid_info1,           & ! set-1 
-                           npts2, pos2, index_list2, grid_info2,           & ! set-2
-                           error_code                                      & 
-        ) bind(c)
-        !! Count number of pairs between two sets of points.
-
-        integer(c_int), intent(in), value :: auto
-        !! Flag indicating pair counting between same sets of points
-        
-        integer(c_int), intent(in), value :: periodic
-        !! Flag for using periodic boundary conditions
-
-        integer(c_int64_t), intent(in), value :: nr   
-        !! Size of distance bins array and count array
-
-        real(c_double), intent(in) :: rbins(nr)
-        !! Distance bin edges
-
-        integer(c_int64_t), intent(out) :: counts(nr)
-        !! Pair counts (last item will be 0 always).
-
-        integer(c_int64_t), intent(in), value :: ncells
-        !! Number of cells in the grid (same for both sets).
-
-        type(boxinfo_t), intent(in) :: box
-        !! Details about the space (both sets must be in the same box)
-
-        integer(c_int64_t), intent(in), value :: npts1
-        !! Number of points in set-1
-
-        real(c_double), intent(in) :: pos1(3, npts1)
-        !! Set-1 positions
-
-        integer(c_int64_t), intent(in) :: index_list1(npts1)
-        !! Sorted cell index list for set-1
-
-        type(cinfo_t), intent(in) :: grid_info1(ncells)
-        !! Grid specification for set-1
-
-        integer(c_int64_t), intent(in) :: npts2
-        !! Number of points in set-2
-
-        real(c_double), intent(in) :: pos2(3, npts2)
-        !! Set-2 positions
-
-        integer(c_int64_t), intent(in) :: index_list2(npts2)
-        !! Sorted cell index list for set-2
-
-        type(cinfo_t), intent(in) :: grid_info2(ncells)
-        !! Grid specification for set-2
         
         integer(c_int), intent(out) :: error_code
         !! Error code (0=success, 1=error)
 
-        integer(c_int64_t) :: j1, j2, cell1(3), delta(3), cstart(3), cstop(3), &
-                              c1, c2, c3
+        integer(c_int64_t), parameter :: chunk_size = 100
+
+        character(256)     :: ifn
+        real(c_double)     :: r2bins(nr)
+        integer(c_int)     :: fi, iostat
+        integer(c_int64_t) :: file_size_bytes, n_pairs, n_pairs_total, n_pairs_processed, &
+                              j1, j2, start1, count1, start2, count2   
+        integer(c_int64_t), allocatable :: pairs(:,:)
 
         error_code = 1
 
-        ! Number of cells to check on each direction 
-        delta = ceiling( rbins(nr) / box%cellsize ) 
+        call omp_set_num_threads(nthreads) ! set number of threads
 
-        do j1 = 1, ncells
+        ! Precalculating cell pairs
+        call enumerate_cell_pairs(pid, npts1, npts2, ncells, rbins(nr), box,  &
+                                  periodic, grid_info1, grid_info2, nthreads, &
+                                  error_code                                  &
+        )
+        if ( error_code /= 0 ) return 
 
-            if ( grid_info1(j1)%count < 1 ) cycle ! Cell is empty
-            
-            ! Finding 3D cell index from flat index
-            call convert_to_3d_index(box%gridsize, j1, cell1)
+        r2bins = rbins**2
+        cnts   = 0_c_int64_t
 
-            ! Find the neighbouring cells and count pairs
-            cstart = apply_bc(cell1 - delta, box%gridsize, periodic)
-            cstop  = apply_bc(cell1 + delta, box%gridsize, periodic)
-            do c1 = cstart(1), cstop(1)
-                do c2 = cstart(2), cstop(2)
-                    do c3 = cstart(3), cstop(3)
+        ! Calculating counts for uniformly populated cells: parallelised 
+        ! over cell pairs:
+        fi = 9 ! file unit for input
+        write(ifn, '(i0,".cpstack.bin")') pid ! filename for input
+        open(newunit=fi, file=ifn, access='stream', form='unformatted', &
+             convert='little_endian', status='old', action='read'       &
+        ) ! input file
+        inquire(fi, size=file_size_bytes)
 
-                        ! Flat index of the neighbour cell
-                        j2 = convert_to_flat_index(box%gridsize, [c1, c2, c3])
-                        
-                        ! Count number of paris
-                        if ( grid_info1(j1)%count < 1 ) cycle ! Cell is empty
+        allocate( pairs(2, chunk_size) )
+        
+        n_pairs_total = file_size_bytes / (2*c_sizeof(1_c_int64_t))
+        if ( n_pairs_total > 0 ) then
+            ! Parallel pair counting over cell pairs:
+            n_pairs_processed = 0
+            do while ( n_pairs_processed < n_pairs_total )
 
-                    end do
-                end do
+                ! Loading pairs as chunks
+                n_pairs = min( chunk_size, n_pairs_total - n_pairs_processed )
+                read(fi, iostat=iostat) pairs(1:2, 1:n_pairs)
+                if ( iostat /= 0 ) exit ! EOF or error    
+
+                ! Counting pairs
+                call count_pairs_cells(pid, auto, periodic, n_pairs, pairs, &
+                                       box, nr, r2bins, cnts, ncells,       &
+                                       npts1, grid_info1, grid_data1, pos1, &
+                                       npts2, grid_info2, grid_data2, pos2  &
+                )
+                n_pairs_processed = n_pairs_processed + n_pairs
+                
             end do
+        end if
+        close(fi, status='delete') ! file is deleted on close
+        deallocate( pairs )
 
+        ! Calculating pair counts for pairs of dense cells. This is parallelised 
+        ! over points. 
+        fi = 9 ! file unit for input
+        write(ifn, '(i0,".cpstack.spl.bin")') pid ! filename for input
+        open(newunit=fi, file=ifn, access='stream', form='unformatted', &
+             convert='little_endian', status='old', action='read'       &
+        ) ! input file
+        inquire(fi, size=file_size_bytes)
+        n_pairs_total = file_size_bytes / (2*c_sizeof(1_c_int64_t))
+        if ( n_pairs_total > 0 ) then
+            ! Parallel pair counting over cell pairs:
+            do
 
-        end do
+                read(fi, iostat=iostat) j1, j2
+                if ( iostat /= 0 ) exit ! EOF or error    
+
+                start1 = grid_info1(j1)%start
+                count1 = grid_info1(j1)%count
+                
+                start2 = grid_info2(j2)%start
+                count2 = grid_info2(j2)%count
+                
+                ! Counting pairs
+                call count_pairs_parallel(pid, nthreads, periodic,                 &
+                                          box%boxsize, nr, r2bins, cnts,           &
+                                          npts1, start1, count1, grid_data1, pos1, & 
+                                          npts2, start2, count2, grid_data2, pos2  &
+                )
+                
+            end do
+        end if
+        close(fi, status='delete') ! file is deleted on close
 
         error_code = 0
-            
+        
     end subroutine count_pairs
+
+    subroutine count_pairs_cells(pid, auto, periodic, npairs, pairs,  &
+                                 box, nr, r2bins, cnts, ncells,       &
+                                 npts1, grid_info1, grid_data1, pos1, &
+                                 npts2, grid_info2, grid_data2, pos2  &
+        ) bind(c)
+        !! Count pairs with parallelization over cells.
+
+        integer(c_int)    , intent(in)    :: auto, periodic
+        integer(c_int64_t), intent(in)    :: pid, nr, ncells, npts1, npts2              
+        integer(c_int64_t), intent(in)    :: npairs, pairs(2,npairs)
+        integer(c_int64_t), intent(in)    :: grid_data1(npts1), grid_data2(npts2)  
+        real(c_double)    , intent(in)    :: r2bins(nr), pos1(3,npts1), pos2(3,npts2)      
+        type(cinfo_t)     , intent(in)    :: grid_info1(ncells), grid_info2(ncells) 
+        type(boxinfo_t)   , intent(in)    :: box
+        integer(c_int64_t), intent(inout) :: cnts(:)
+        
+    end subroutine count_pairs_cells
+
+    subroutine count_pairs_sequential(periodic, boxsize, nr, r2bins, cnts,     &
+                                      npts1, start1, count1, grid_data1, pos1, &
+                                      npts2, start2, count2, grid_data2, pos2  &
+        )
+        !! Counting the pairs between sections of position buffers. This 
+        !! is a sequential version of the broute force pair counting between 
+        !! two cells.
+        
+        integer(c_int)    , intent(in)    :: periodic
+        integer(c_int64_t), intent(in)    :: npts1, npts2, nr
+        integer(c_int64_t), intent(in)    :: start1, start2, count1, count2
+        integer(c_int64_t), intent(in)    :: grid_data1(npts1), grid_data2(npts2)
+        real(c_double)    , intent(in)    :: pos1(3,npts1), pos2(3,npts2), boxsize(3)
+        real(c_double)    , intent(in)    :: r2bins(nr)
+        integer(c_int64_t), intent(inout) :: cnts(:) ! Must be of size nr-1
+
+        integer(c_int64_t) :: j1, j2, i1, i2, bin_loc
+        real(c_double)     :: dx(3), r2
+
+        do j1 = start1, start1+count1-1
+
+            ! Index of the point in position buffer
+            i1 = grid_data1(j1) 
+            
+            do j2 = start2, start2+count2-1
+                
+                ! Index of the point in position buffer
+                i2 = grid_data2(j2) 
+                
+                ! Check pair distance
+                dx = pos2(1:3, i2) - pos1(1:3, i1) 
+                if ( periodic /= 0 ) then
+                    ! Correcting the coordinate distances for periodic boundary
+                    dx = dx - boxsize*nint(dx / boxsize) 
+                end if 
+                r2      = sum( dx**2 ) ! squared distance between the points
+                bin_loc = locate_bin( r2, r2bins, nr ) ! bin index
+                if ( bin_loc > 0 ) then               
+                    cnts(bin_loc) = cnts(bin_loc) + 1 ! add to bin
+                end if
+            
+            end do
+        end do
+
+    end subroutine count_pairs_sequential
+
+    subroutine count_pairs_parallel(pid, nthreads,                            & 
+                                    periodic, boxsize, nr, r2bins, cnts,      &
+                                    npts1, start1, count1, grid_data1, pos1,  &
+                                    npts2, start2, count2, grid_data2, pos2   &
+        )
+        !! Counting the pairs between sections of position buffers. This 
+        !! is a parallel version of the broute force pair counting between 
+        !! two cells.
+        
+        integer(c_int)    , intent(in)    :: periodic, nthreads
+        integer(c_int64_t), intent(in)    :: pid, npts1, npts2, nr
+        integer(c_int64_t), intent(in)    :: start1, start2, count1, count2
+        integer(c_int64_t), intent(in)    :: grid_data1(npts1), grid_data2(npts2)
+        real(c_double)    , intent(in)    :: pos1(3,npts1), pos2(3,npts2), boxsize(3)
+        real(c_double)    , intent(in)    :: r2bins(nr)
+        integer(c_int64_t), intent(inout) :: cnts(:) ! Must be of size nr-1
+
+        character(256)     :: fn
+        integer(c_int)     :: tid, fu
+        real(c_double)     :: dx(3), r2
+        integer(c_int64_t) :: npairs, k, i1, i2, bin_loc
+        integer(c_int64_t), allocatable :: local_cnts(:)
+
+        npairs = count1*count2 ! Total number of possible pairs
+
+        !$OMP  PARALLEL DEFAULT(SHARED) &
+        !$OMP& PRIVATE(tid, k, i1, i2, bin_loc, r2, dx, local_cnts, fu, fn)
+
+        allocate( local_cnts(nr) )
+
+        !$OMP DO SCHEDULE(STATIC)
+        do k = 0, npairs-1
+            
+            ! Index of the 1-st point in position buffer
+            i1 = modulo(k, count1) + start1 ! cell index
+            i1 = grid_data1(i1) 
+            
+            ! Index of the 2-nd point in position buffer
+            i2 = modulo(k / count1, count2) + start2 ! cell index
+            i2 = grid_data2(i2) 
+            
+            ! Check pair distance
+            dx = pos2(1:3, i2) - pos1(1:3, i1) 
+            if ( periodic /= 0 ) then
+                ! Correcting the coordinate distances for periodic boundary
+                dx = dx - boxsize*nint(dx / boxsize) 
+            end if 
+            r2      = sum( dx**2 ) ! squared distance between the points
+            bin_loc = locate_bin( r2, r2bins, nr ) ! bin index
+            if ( bin_loc > 0 ) then
+                local_cnts(bin_loc) = local_cnts(bin_loc) + 1 ! add to bin
+            end if
+
+        end do
+        !$OMP END DO
+        
+        ! Wrie data to temp file
+        tid = omp_get_thread_num() + 1 ! thread ID 
+        fu  = 10 + tid ! file unit for this thread
+        write( fn, '(i0,".",i0,"cnts.bin")' ) pid, tid ! filename for this thread
+        open(newunit=fu, file=fn, access='stream', form='unformatted',      &
+             convert='little_endian', status='unknown', position='append',  &
+             action='write'                                                 &
+        )
+        write(fu) local_cnts
+        close(fu)
+
+        deallocate( local_cnts )
+
+        !$OMP END PARALLEL
+
+        ! Accumulating counts
+        allocate( local_cnts(nr) )
+        do tid = 1, nthreads
+            fu  = 10 + tid ! file unit for this thread
+            write( fn, '(i0,".",i0,"cnts.bin")' ) pid, tid ! filename for this thread
+            open(newunit=fu, file=fn, access='stream', form='unformatted',      &
+                 convert='little_endian', status='unknown', position='append',  &
+                 action='write'                                                 &
+            )
+            read(fu) local_cnts
+            cnts(1:nr-1) = cnts(1:nr-1) + local_cnts(1:nr-1)
+            close(fu, status='delete') ! file is deleted on close 
+        end do
+        deallocate( local_cnts )
+
+    end subroutine count_pairs_parallel
+
+! Helper functions:
+
+    function locate_bin(val, edges, n) result(i)
+        !! Locate the bin containing the given value using a binary search 
+        !! on the bin edges array. 
+        real(c_double)    , intent(in) :: val, edges(n)
+        integer(c_int64_t), intent(in) :: n
+        integer(c_int64_t) :: i, lo, hi, m
+    
+        ! Out-of-range check
+        if (val < edges(1) .or. val >= edges(n)) then
+            i = -1_c_int64_t
+            return
+        end if
+
+        ! Binary search
+        lo = 1_c_int64_t
+        hi = n
+        do while ( hi - lo > 1 )
+            m = (lo + hi) / 2
+            if ( val < edges(m) ) then
+                hi = m
+            else
+                lo = m
+            end if
+        end do
+
+        i = lo ! bin index such that edges(i) <= val < edges(i+1)
+    
+    end function locate_bin
 
 end module pair_counting_mod
