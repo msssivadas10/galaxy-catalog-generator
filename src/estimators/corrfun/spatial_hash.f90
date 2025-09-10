@@ -38,7 +38,7 @@ module spatial_hash_mod
 contains
 
     subroutine build_grid_hash(pid, npts, pos, box, ncells, grid_info, &
-                               index_list, nthreads, error_code        &
+                               grid_data, nthreads, error_code         &
         ) bind(c)
         !! Calculate a grid spatial hash for the positions for fast and efficient 
         !! pair counting.
@@ -58,11 +58,13 @@ contains
         integer(c_int64_t), intent(in), value :: ncells
         !! Number of cells in the grid - must be equal to `product(gridsize)`
 
-        integer(c_int64_t), intent(out) :: index_list(npts)
-        !! Indices of points, grouped by sorted cell index 
+        integer(c_int64_t), intent(out) :: grid_data(npts)
+        !! Grid data - an array of cell blocks, where each block gives the 
+        !! indices of the points in that cell. This together with `grid_info`
+        !! and poistion buffer give the complete grid hash.  
 
         type(cinfo_t), intent(out) :: grid_info(ncells)
-        !! Grid data - start index and size of each cell group. 
+        !! Grid details - start index and size of each cell group. 
 
         integer(c_int), intent(in), value :: nthreads
         !! Number of threads to use
@@ -205,14 +207,14 @@ contains
         offset(:) = 0_c_int64_t
 
         !$OMP PARALLEL DEFAULT(SHARED) PRIVATE(i, j, p)
-        !$OMP DO
+        !$OMP DO SCHEDULE(static)
         do i = 1, npts
             j = cell_index(i) + 1
             !$OMP ATOMIC CAPTURE
             p         = offset(j)
             offset(j) = offset(j) + 1
             !$OMP END ATOMIC
-            index_list( grid_info(j)%start + p ) = i
+            grid_data( grid_info(j)%start + p ) = i
         end do
         !$OMP END DO
         !$OMP END PARALLEL
