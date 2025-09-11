@@ -7,16 +7,19 @@ module pair_utils_mod
     implicit none
 
     private
-    public :: enumerate_cell_pairs, to_3d_index, to_flat_index, apply_bc
+    public :: enumerate_cell_pairs, to_3d_index, to_flat_index
     
 contains
 
     subroutine enumerate_cell_pairs(pid, npts1, npts2, ncells, rmax, box, periodic, &
                                     grid_info1, grid_info2, nthreads, error_code    &
-        )
+        ) bind(c)
         !! List all possible cell pairs. Also, marks the pairs that needs special
         !! handling. Data are written to disk, to a file with name based on the 
-        !! `pid` value.
+        !! `pid` value. Cell pairs, where the counts are almost uniform will be 
+        !! in `pid.cplist.bin` file as a binary stream of int64 index pairs (1-
+        !! based flat index). Also, pairs of unusually populated cells are stored 
+        !! seperately in `pid.cplist.spl.bin` in the same format.    
         
         integer(c_int64_t), intent(in), value :: pid
         !! Process ID
@@ -39,7 +42,7 @@ contains
         type(cinfo_t), intent(in) :: grid_info1(ncells)
         !! Grid specification for set-1
 
-        integer(c_int64_t), intent(in) :: npts2
+        integer(c_int64_t), intent(in), value :: npts2
         !! Number of points in set-2
 
         type(cinfo_t), intent(in) :: grid_info2(ncells)
@@ -56,7 +59,7 @@ contains
         ! Check gridsize and total number of cells matching:
         error_code = 3
         if ( product(box%gridsize) /= ncells ) return
-
+        
         ! Check gridsize and cellsize matching:
         error_code = 2
         if (any(abs(box%cellsize - box%boxsize / box%gridsize) > 1e-08_c_double)) return
@@ -71,6 +74,7 @@ contains
         ! runs from `c[i] - delta[i]` to `c[i] + delta[i]` (BC applied). 
         delta = ceiling( rmax / box%cellsize ) 
 
+        call omp_set_num_threads(nthreads) ! set number of threads
         call distribute_enumeration(pid, periodic, count_th, box%gridsize, &
                                     delta, ncells, grid_info1, grid_info2  &
         )
@@ -122,11 +126,15 @@ contains
             ! Converting the flat cell index to 3D index
             c1 = to_3d_index( j1, gridsize )
 
-            ! Find the range of indices for the neighbouring cells. Periodic 
-            ! wrapping is used if using a periodic BC. Otherwise, the values 
-            ! are clipped to the range [0, gridsize-1].  
-            cstart = c1 - delta; call apply_bc(cstart, gridsize, periodic)
-            cstop  = c1 + delta; call apply_bc(cstop , gridsize, periodic)
+            ! Find the range of indices for the neighbouring cells. 
+            cstart = c1 - delta
+            cstop  = c1 + delta
+            if ( periodic == 0 ) then
+                ! When periodic BC is not used, ignore the cells outside the 
+                ! grid range, so that cell indices are in range [0, gridsize-1].
+                cstart = min( max( 0_c_int64_t, cstart ), gridsize-1 )
+                cstop  = min( max( 0_c_int64_t, cstop  ), gridsize-1 )
+            end if
 
             if ( grid_info1(j1)%count > count_th(1) ) then
                 ! This cell is over-populated, based on the given over-population 
@@ -145,7 +153,13 @@ contains
             do k = 1, kstop
 
                 ! Converting the 3D cell index to a flat index
-                j2 = to_flat_index( c2, gridsize )
+                if ( periodic /= 0 ) then
+                    ! Using periodic boundary conditions: wrap around, if the cell  
+                    ! index is outside the range. 
+                    j2 = to_flat_index( modulo( c2, gridsize ), gridsize )
+                else 
+                    j2 = to_flat_index( c2, gridsize )
+                end if
 
                 if ( grid_info2(j2)%count > 0 ) then
                     ! The combined over-population flag will be set based on the  
@@ -269,22 +283,4 @@ contains
 
     end function to_flat_index
 
-    subroutine apply_bc(cell, gridsize, periodic)
-        !! Apply a boundary condition to the 3D cell index. This 3D index 
-        !! follows 0-based indexing.
-        integer(c_int)    , intent(in)    :: periodic
-        integer(c_int64_t), intent(in)    :: gridsize(3)
-        integer(c_int64_t), intent(inout) :: cell(3)
-    
-        if ( periodic /= 0 ) then
-            ! Using periodic boundary conditions: wrap around if the cell  
-            ! index is outside range. 
-            cell = modulo( cell, gridsize )
-        else
-            ! No periodic wrapping: clip the value between 0 and gridsize
-            cell = min( max( 0_c_int64_t, cell ), gridsize-1 )
-        end if
-        
-    end subroutine apply_bc
-    
 end module pair_utils_mod
