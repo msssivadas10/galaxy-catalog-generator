@@ -13,7 +13,7 @@ contains
 
     subroutine enumerate_cell_pairs(pid, npts1, npts2, ncells, rmax, box, periodic, &
                                     grid_info1, grid_info2, nthreads, error_code    &
-        ) bind(c)
+        )
         !! List all possible cell pairs. Also, marks the pairs that needs special
         !! handling. Data are written to disk, to a file with name based on the 
         !! `pid` value. Cell pairs, where the counts are almost uniform will be 
